@@ -1,0 +1,271 @@
+use crate::codex::parser::parse_line;
+use crate::codex::registry::SkillRegistry;
+use crate::config::Config;
+use crate::db::{Database, ParsedFile};
+use crate::error::Result;
+use crate::events::SessionState;
+use crate::paths::normalize_for_compare;
+use chrono::{DateTime, Utc};
+use serde::Serialize;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
+
+#[derive(Debug, Default, Serialize)]
+pub struct ScanResult {
+    pub files_scanned: u64,
+    pub events_inserted: u64,
+    pub errors: u64,
+}
+
+pub fn scan_all(db: &mut Database, config: &Config, rescan: bool) -> Result<ScanResult> {
+    let registry = SkillRegistry::scan(config)?;
+    let mut result = ScanResult::default();
+    for file in session_files(config)? {
+        let file_result = scan_file(db, &file, &registry, rescan)?;
+        result.files_scanned += 1;
+        result.events_inserted += file_result.events_inserted;
+        result.errors += file_result.errors;
+    }
+    Ok(result)
+}
+
+pub fn session_files(config: &Config) -> Result<Vec<PathBuf>> {
+    let sessions_dir = config.sessions_dir();
+    if !sessions_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut files = Vec::new();
+    for entry in WalkDir::new(sessions_dir).follow_links(false) {
+        let entry = entry?;
+        if entry.file_type().is_file()
+            && entry
+                .path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext == "jsonl")
+        {
+            files.push(entry.path().to_path_buf());
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+struct FileScanResult {
+    events_inserted: u64,
+    errors: u64,
+}
+
+fn scan_file(
+    db: &mut Database,
+    path: &Path,
+    registry: &SkillRegistry,
+    rescan: bool,
+) -> Result<FileScanResult> {
+    let metadata = fs::metadata(path)?;
+    let file_size = metadata.len();
+    let modified_at = metadata
+        .modified()
+        .ok()
+        .map(DateTime::<Utc>::from)
+        .map(|value| value.to_rfc3339());
+
+    let mut parsed = db.parsed_file(path)?.unwrap_or_else(|| ParsedFile {
+        path: path.to_string_lossy().into_owned(),
+        canonical_path: Some(normalize_for_compare(path).to_string_lossy().into_owned()),
+        ..ParsedFile::default()
+    });
+
+    if rescan || file_size < parsed.byte_offset {
+        parsed.byte_offset = 0;
+        parsed.line_number = 0;
+        parsed.partial_line.clear();
+        parsed.session_id = None;
+        parsed.turn_id = None;
+        parsed.cwd = None;
+    }
+
+    let start_offset = parsed.byte_offset;
+    let mut file = File::open(path)?;
+    file.seek(SeekFrom::Start(start_offset))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+
+    let (complete_bytes, partial_bytes) = match bytes.iter().rposition(|byte| *byte == b'\n') {
+        Some(index) => bytes.split_at(index + 1),
+        None => (&[][..], bytes.as_slice()),
+    };
+
+    let mut current_offset = start_offset;
+    let mut current_line = parsed.line_number;
+    let mut state = session_state_from_parsed(&parsed);
+    let mut result = FileScanResult {
+        events_inserted: 0,
+        errors: 0,
+    };
+    let mut last_error = None;
+
+    for line_bytes in complete_bytes.split_inclusive(|byte| *byte == b'\n') {
+        let source_offset = current_offset;
+        current_offset += line_bytes.len() as u64;
+        current_line += 1;
+
+        let line = String::from_utf8_lossy(line_bytes);
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if trimmed.trim().is_empty() {
+            continue;
+        }
+
+        match parse_line(
+            trimmed,
+            path,
+            source_offset,
+            current_line,
+            registry,
+            &mut state,
+        ) {
+            Ok(events) => {
+                for event in events {
+                    if db.insert_invocation(&event)? {
+                        result.events_inserted += 1;
+                    }
+                }
+            }
+            Err(err) => {
+                result.errors += 1;
+                last_error = Some(format!("line {current_line}: {err}"));
+            }
+        }
+    }
+
+    parsed.file_size = file_size;
+    parsed.modified_at = modified_at;
+    parsed.byte_offset = current_offset;
+    parsed.line_number = current_line;
+    parsed.partial_line = String::from_utf8_lossy(partial_bytes).into_owned();
+    parsed.canonical_path = Some(normalize_for_compare(path).to_string_lossy().into_owned());
+    parsed.session_id = state.session_id;
+    parsed.turn_id = state.turn_id;
+    parsed.cwd = state.cwd.map(|cwd| cwd.to_string_lossy().into_owned());
+    parsed.fingerprint = Some(format!("size:{file_size}:offset:{current_offset}"));
+    parsed.last_error = last_error;
+    db.upsert_parsed_file(&parsed)?;
+
+    Ok(result)
+}
+
+fn session_state_from_parsed(parsed: &ParsedFile) -> SessionState {
+    SessionState {
+        session_id: parsed.session_id.clone(),
+        turn_id: parsed.turn_id.clone(),
+        cwd: parsed.cwd.as_ref().map(PathBuf::from),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use std::fs;
+    use tempfile::TempDir;
+
+    struct Fixture {
+        _tmp: TempDir,
+        root: PathBuf,
+        config: Config,
+        session_file: PathBuf,
+        db_path: PathBuf,
+        skill_path: PathBuf,
+    }
+
+    fn fixture() -> Fixture {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let codex_home = root.join(".codex");
+        let agents_home = root.join(".agents");
+        let session_dir = codex_home.join("sessions/2026/07/02");
+        fs::create_dir_all(&session_dir).unwrap();
+        let skill_dir = agents_home.join("skills/diagnose");
+        fs::create_dir_all(skill_dir.join("scripts")).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "---\nname: diagnose\n---\n").unwrap();
+        fs::write(skill_dir.join("scripts/check.py"), "print('ok')\n").unwrap();
+        let session_file = session_dir.join("session.jsonl");
+        let db_path = tmp.path().join("skillscope.sqlite");
+        Fixture {
+            _tmp: tmp,
+            root,
+            config: Config {
+                codex_home,
+                agents_home,
+                db_path: db_path.clone(),
+            },
+            session_file,
+            db_path,
+            skill_path: skill_dir.join("SKILL.md"),
+        }
+    }
+
+    #[test]
+    fn scan_is_incremental_and_deduplicated() {
+        let fixture = fixture();
+        let explicit = format!(
+            r#"{{"timestamp":"2026-07-02T00:00:00Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"<skill>\n<name>diagnose</name>\n<path>{}</path>\n</skill>"}}]}}}}"#,
+            fixture.skill_path.to_string_lossy()
+        );
+        let implicit = format!(
+            r#"{{"timestamp":"2026-07-02T00:00:01Z","type":"response_item","payload":{{"type":"function_call","name":"exec_command","call_id":"call_1","arguments":"{{\"cmd\":\"sed -n '1,120p' {}\"}}"}}}}"#,
+            fixture.skill_path.to_string_lossy()
+        );
+        fs::write(&fixture.session_file, format!("{explicit}\n{implicit}\n")).unwrap();
+
+        let mut db = Database::open(&fixture.db_path).unwrap();
+        db.init().unwrap();
+        let first = scan_all(&mut db, &fixture.config, false).unwrap();
+        assert_eq!(first.events_inserted, 2);
+
+        let second = scan_all(&mut db, &fixture.config, false).unwrap();
+        assert_eq!(second.events_inserted, 0);
+    }
+
+    #[test]
+    fn scan_waits_for_complete_jsonl_line() {
+        let fixture = fixture();
+        let explicit = format!(
+            r#"{{"timestamp":"2026-07-02T00:00:00Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"<skill>\n<name>diagnose</name>\n<path>{}</path>\n</skill>"}}]}}}}"#,
+            fixture.skill_path.to_string_lossy()
+        );
+        fs::write(&fixture.session_file, explicit.as_bytes()).unwrap();
+
+        let mut db = Database::open(&fixture.db_path).unwrap();
+        db.init().unwrap();
+        let first = scan_all(&mut db, &fixture.config, false).unwrap();
+        assert_eq!(first.events_inserted, 0);
+
+        fs::write(&fixture.session_file, format!("{explicit}\n")).unwrap();
+        let second = scan_all(&mut db, &fixture.config, false).unwrap();
+        assert_eq!(second.events_inserted, 1);
+    }
+
+    #[test]
+    fn incremental_scan_preserves_cwd_for_relative_script_detection() {
+        let fixture = fixture();
+        let context = format!(
+            r#"{{"type":"turn_context","payload":{{"turn_id":"turn_1","cwd":"{}"}}}}"#,
+            fixture.root.to_string_lossy()
+        );
+        fs::write(&fixture.session_file, format!("{context}\n")).unwrap();
+
+        let mut db = Database::open(&fixture.db_path).unwrap();
+        db.init().unwrap();
+        let first = scan_all(&mut db, &fixture.config, false).unwrap();
+        assert_eq!(first.events_inserted, 0);
+
+        let implicit = r#"{"timestamp":"2026-07-02T00:00:01Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"call_1","arguments":"{\"cmd\":\"python3 .agents/skills/diagnose/scripts/check.py\"}"}}"#;
+        fs::write(&fixture.session_file, format!("{context}\n{implicit}\n")).unwrap();
+
+        let second = scan_all(&mut db, &fixture.config, false).unwrap();
+        assert_eq!(second.events_inserted, 1);
+    }
+}
