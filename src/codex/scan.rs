@@ -21,9 +21,18 @@ pub struct ScanResult {
 
 pub fn scan_all(db: &mut Database, config: &Config, rescan: bool) -> Result<ScanResult> {
     let registry = SkillRegistry::scan(config)?;
+    scan_all_with_registry(db, config, &registry, rescan)
+}
+
+pub fn scan_all_with_registry(
+    db: &mut Database,
+    config: &Config,
+    registry: &SkillRegistry,
+    rescan: bool,
+) -> Result<ScanResult> {
     let mut result = ScanResult::default();
     for file in session_files(config)? {
-        let file_result = scan_file(db, &file, &registry, rescan)?;
+        let file_result = scan_file(db, &file, registry, rescan)?;
         result.files_scanned += 1;
         result.events_inserted += file_result.events_inserted;
         result.errors += file_result.errors;
@@ -53,12 +62,12 @@ pub fn session_files(config: &Config) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-struct FileScanResult {
-    events_inserted: u64,
-    errors: u64,
+pub struct FileScanResult {
+    pub events_inserted: u64,
+    pub errors: u64,
 }
 
-fn scan_file(
+pub fn scan_file(
     db: &mut Database,
     path: &Path,
     registry: &SkillRegistry,
