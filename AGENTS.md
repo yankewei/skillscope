@@ -30,7 +30,7 @@ Entry flow: `main.rs` dispatches 4 subcommands (`scan`/`watch`/`stats`/`doctor`)
 
 **DB path is NOT what the docs say.** `docs/rust-implementation-design.md` says `~/.skillscope/skillscope.db`. The code (`config.rs:35`) uses `dirs::data_local_dir().join("skillscope").join("skillscope.sqlite")` — i.e. `~/Library/Application Support/skillscope/skillscope.sqlite` on macOS, `~/.local/share/skillscope/...` on Linux. Run `skillscope doctor` to print the real path. `.gitignore` covers `*.sqlite` and `*.db`.
 
-**Docs diverge from code.** `docs/` are design specs, not accurate reference. Confirmed divergences: db path (above), `stats --until` documented but not implemented, module list in the doc omits `scan.rs`/`doctor.rs`. Trust executable code over prose.
+**Docs have been reconciled with code.** `docs/rust-implementation-design.md` was aligned to the implementation: db path, module list (`scan.rs`/`doctor.rs`), global flags (`--agents-home`), removed unimplemented `scan --since` / `stats --until`. `docs/` are design specs — still trust executable code over prose for anything not verified.
 
 **Incremental scan semantics (do not break).** `scan_file` seeks to `parsed_files.byte_offset` and reads only new bytes. The last incomplete line (no trailing `\n`) is stored in `partial_line` and `byte_offset` is NOT advanced past it — next scan re-reads from that offset. If `file_size < byte_offset` (truncation/rotation), offset resets to 0 and session state clears. Session state is persisted across incremental scans so relative script paths can resolve without re-reading earlier turns.
 

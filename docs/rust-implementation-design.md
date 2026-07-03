@@ -26,6 +26,18 @@ skillscope stats
 skillscope doctor
 ```
 
+### 全局参数
+
+以下参数对所有子命令生效：
+
+```text
+--codex-home <path>     默认 ~/.codex
+--agents-home <path>    默认 ~/.agents
+--db <path>             默认 <data_local_dir>/skillscope/skillscope.sqlite
+```
+
+`<data_local_dir>` 由 `dirs::data_local_dir` 决定：macOS 下为 `~/Library/Application Support`，Linux 下为 `~/.local/share`。可用 `skillscope doctor` 查看本机实际路径。
+
 ### `scan`
 
 执行一次扫描，然后退出。
@@ -40,9 +52,6 @@ skillscope doctor
 常用参数：
 
 ```text
---codex-home <path>     默认 ~/.codex
---db <path>             默认 ~/.skillscope/skillscope.db
---since <YYYY-MM-DD>    只扫描该日期之后的 session 文件
 --json                  输出本次扫描发现的事件 JSON
 --rescan                忽略文件游标，重新扫描并依赖事件唯一键去重
 ```
@@ -56,7 +65,7 @@ skillscope doctor
 1. 先执行一次 `scan`，补齐进程启动前已经存在的内容。
 2. 使用文件监听监控 `~/.codex/sessions`。
 3. 新文件创建、文件增长、文件重命名时触发增量解析。
-4. 定期做一次轻量 rescan，弥补文件监听丢事件。
+4. 定期做一次轻量全量扫描（不重置游标），弥补文件监听丢事件。
 
 推荐参数：
 
@@ -113,9 +122,10 @@ src/
   codex/
     mod.rs
     registry.rs
-    session_scan.rs
+    scan.rs
     parser.rs
     command_detection.rs
+    doctor.rs
   events.rs
   stats.rs
   watch.rs
@@ -129,9 +139,10 @@ src/
 - `config`：解析默认路径、用户参数和环境变量。
 - `db`：SQLite schema、migration、读写事务。
 - `codex::registry`：扫描本机 Skill 注册表。
-- `codex::session_scan`：发现 Codex session JSONL 文件，处理文件游标。
+- `codex::scan`：发现 Codex session JSONL 文件，处理文件游标，执行增量解析。
 - `codex::parser`：把 JSONL 行转换为候选事件。
 - `codex::command_detection`：复现 Codex 隐式 Skill 命令判定。
+- `codex::doctor`：输出本地配置和索引健康状态。
 - `events`：归一化事件类型和去重 key。
 - `stats`：聚合查询。
 - `watch`：文件监听和增量调度。
@@ -157,11 +168,14 @@ shlex       shell token 化
 
 ## SQLite schema
 
-数据库默认位置：
+数据库默认位置（由 `dirs::data_local_dir` 决定，平台相关）：
 
 ```text
-~/.skillscope/skillscope.db
+macOS:  ~/Library/Application Support/skillscope/skillscope.sqlite
+Linux:  ~/.local/share/skillscope/skillscope.sqlite
 ```
+
+可用 `skillscope doctor` 查看本机实际路径。
 
 ### `schema_migrations`
 
@@ -201,7 +215,7 @@ CREATE TABLE parsed_files (
 - `line_number`：便于报错定位。
 - `partial_line`：上次读到但尚未形成完整 JSONL 行的尾部内容。
 - `session_id` / `turn_id` / `cwd`：上次扫描结束时的轻量 session 上下文，用于增量扫描恢复相对路径解析和事件归属。
-- `fingerprint`：用于检测文件替换，第一版可以由文件大小、mtime、首行 hash 组成。
+- `fingerprint`：用于检测文件替换，格式为 `size:{file_size}:offset:{byte_offset}`。
 - `last_error`：最近一次解析错误，`doctor` 使用。
 
 文件如果变小，说明被截断、压缩替换或轮转。处理规则：
@@ -416,7 +430,7 @@ GROUP BY skill_name
 ORDER BY total_count DESC, skill_name ASC;
 ```
 
-`--since` 和 `--until` 通过 `timestamp` 过滤。
+`--since` 通过 `timestamp` 前缀匹配过滤（支持 `YYYY-MM-DD` 或完整 ISO 时间戳）。当前未实现 `--until`。
 
 ## 隐私边界
 
