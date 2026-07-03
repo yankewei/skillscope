@@ -6,6 +6,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct Config {
     pub codex_home: PathBuf,
+    pub claude_home: PathBuf,
     pub agents_home: PathBuf,
     pub db_path: PathBuf,
 }
@@ -23,6 +24,11 @@ impl Config {
                 .as_ref()
                 .map(|path| expand_tilde(path))
                 .unwrap_or_else(|| home.join(".codex")),
+            claude_home: cli
+                .claude_home
+                .as_ref()
+                .map(|path| expand_tilde(path))
+                .unwrap_or_else(|| home.join(".claude")),
             agents_home: cli
                 .agents_home
                 .as_ref()
@@ -38,5 +44,9 @@ impl Config {
 
     pub fn sessions_dir(&self) -> PathBuf {
         self.codex_home.join("sessions")
+    }
+
+    pub fn claude_projects_dir(&self) -> PathBuf {
+        self.claude_home.join("projects")
     }
 }

@@ -6,14 +6,14 @@
 
 第一版实现一个本地 CLI，可以：
 
-- 扫描 Codex 本地 session JSONL。
-- 识别显式 Skill 注入和隐式 Skill 命令命中。
+- 扫描 Codex 本地 session JSONL 和 Claude Code 本地 project JSONL。
+- 识别 Codex 显式 Skill 注入、Codex 隐式 Skill 命令命中，以及 Claude Code `Skill` tool use。
 - 将归一化调用事件写入 SQLite。
 - 持久化每个日志文件的解析游标，支持增量扫描。
 - 提供接近实时的 watch 模式，持续监控新增 session 文件和追加内容。
 - 输出基础统计，例如按 Skill、按调用类型、按时间范围聚合。
 
-暂不实现 dashboard、后台系统服务、Claude Code adapter、远端同步或跨设备聚合。
+暂不实现 dashboard、后台系统服务、远端同步或跨设备聚合。
 
 ## CLI 形态
 
@@ -32,6 +32,7 @@ skillscope doctor
 
 ```text
 --codex-home <path>     默认 ~/.codex
+--claude-home <path>    默认 ~/.claude
 --agents-home <path>    默认 ~/.agents
 --db <path>             默认 <data_local_dir>/skillscope/skillscope.sqlite
 ```
@@ -44,7 +45,7 @@ skillscope doctor
 
 默认行为：
 
-- 扫描 `~/.codex/sessions/**/*.jsonl`。
+- 扫描 `~/.codex/sessions/**/*.jsonl` 和 `~/.claude/projects/**/*.jsonl`。
 - 从 SQLite 中读取每个文件的上次解析位置。
 - 只解析新增内容。
 - 将新发现的 Skill 调用写入 SQLite。
@@ -126,6 +127,10 @@ src/
     parser.rs
     command_detection.rs
     doctor.rs
+  claude/
+    mod.rs
+    scan.rs
+    parser.rs
   events.rs
   stats.rs
   watch.rs
@@ -143,6 +148,8 @@ src/
 - `codex::parser`：把 JSONL 行转换为候选事件。
 - `codex::command_detection`：复现 Codex 隐式 Skill 命令判定。
 - `codex::doctor`：输出本地配置和索引健康状态。
+- `claude::scan`：发现 Claude Code project JSONL 文件，处理文件游标，执行增量解析。
+- `claude::parser`：识别 Claude Code assistant `Skill` tool use。
 - `events`：归一化事件类型和去重 key。
 - `stats`：聚合查询。
 - `watch`：文件监听和增量调度。

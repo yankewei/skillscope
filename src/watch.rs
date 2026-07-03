@@ -1,5 +1,6 @@
+use crate::claude::scan as claude_scan;
 use crate::codex::registry::SkillRegistry;
-use crate::codex::scan::{scan_all_with_registry, scan_file};
+use crate::codex::scan::{scan_all_with_registry, scan_file, ScanResult};
 use crate::config::Config;
 use crate::db::Database;
 use crate::error::Result;
@@ -16,7 +17,8 @@ pub fn run(
     debounce: Duration,
 ) -> Result<()> {
     let mut registry = SkillRegistry::scan(config)?;
-    let initial = scan_all_with_registry(db, config, &registry, false)?;
+    let mut initial = scan_all_with_registry(db, config, &registry, false)?;
+    merge_scan_result(&mut initial, claude_scan::scan_all(db, config, false)?);
     println!(
         "initial scan: {} files, {} new skill invocations",
         initial.files_scanned, initial.events_inserted
@@ -76,7 +78,8 @@ pub fn run(
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 registry = SkillRegistry::scan(config)?;
-                let result = scan_all_with_registry(db, config, &registry, false)?;
+                let mut result = scan_all_with_registry(db, config, &registry, false)?;
+                merge_scan_result(&mut result, claude_scan::scan_all(db, config, false)?);
                 if result.events_inserted > 0 || result.errors > 0 {
                     println!(
                         "poll scan: {} files, {} new skill invocations, {} errors",
@@ -98,4 +101,11 @@ pub fn run(
 
 fn is_jsonl(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
+}
+
+fn merge_scan_result(result: &mut ScanResult, other: ScanResult) {
+    result.files_scanned += other.files_scanned;
+    result.events_inserted += other.events_inserted;
+    result.errors += other.errors;
+    result.events.extend(other.events);
 }

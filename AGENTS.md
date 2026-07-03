@@ -6,7 +6,7 @@ Compact guidance for OpenCode sessions working in this repo. Code is the source 
 
 ```sh
 cargo build
-cargo test --all-targets --all-features        # 10 unit tests, no integration binary
+cargo test --all-targets --all-features        # 13 unit tests, no integration binary
 cargo test <name_substring>                     # single test, e.g. `cargo test scan_is_incremental`
 cargo clippy --all-targets --all-features -- -D warnings   # CI treats warnings as errors
 cargo fmt --all -- --check                      # CI checks formatting; run `cargo fmt` before commit
@@ -18,12 +18,14 @@ CI (`.github/workflows/ci.yml`) runs fmt → clippy → test on ubuntu-latest wi
 
 Single Rust crate (no workspace), 2021 edition. `Cargo.lock` is committed (binary crate). No async runtime — `scan` and `watch` are intentionally synchronous; do not add `tokio` for this CLI.
 
-Entry flow: `main.rs` dispatches 4 subcommands (`scan`/`watch`/`stats`/`doctor`) with global flags `--codex-home`, `--agents-home`, `--db`.
+Entry flow: `main.rs` dispatches 4 subcommands (`scan`/`watch`/`stats`/`doctor`) with global flags `--codex-home`, `--claude-home`, `--agents-home`, `--db`.
 
 - `codex/scan.rs` — incremental JSONL parser. Per-file `byte_offset` cursor lives in the `parsed_files` SQLite table.
 - `codex/parser.rs` — turns JSONL lines into `SkillInvocation` events; updates lightweight session state (`session_id`/`turn_id`/`cwd`).
 - `codex/command_detection.rs` — implicit Skill detection from shell commands.
 - `codex/registry.rs` — scans `~/.codex/skills`, `~/.agents/skills`, `~/.codex/plugins/cache/**/skills` for `SKILL.md`.
+- `claude/parser.rs` — detects Claude Code `Skill` tool uses from `~/.claude/projects/**/*.jsonl`; it does not parse prompts or persist tool args.
+- `claude/scan.rs` — incremental Claude transcript scanner using the same `parsed_files.byte_offset` cursor semantics.
 - `watch.rs` — `notify` file watcher; calls `scan_file` per changed path (see below).
 
 ## Non-obvious gotchas
@@ -37,6 +39,8 @@ Entry flow: `main.rs` dispatches 4 subcommands (`scan`/`watch`/`stats`/`doctor`)
 **Event dedup.** `SkillInvocation.id = codex:{source_file}:{source_offset}:{trigger_source}:{skill_path_or_name}` with `INSERT OR IGNORE`. `--rescan` is safe — re-scanning never duplicates events.
 
 **Implicit detection is gated on `exec_command`.** `parser.rs` only runs command detection when `payload.name == "exec_command"`. Other shell/unified-exec tool names require real session samples before adding (see `docs/codex-skill-invocation-analytics.md`). `find ... -name SKILL.md` correctly does not count — path resolution + token filtering handle it.
+
+**Claude Code support is intentionally simpler.** Claude Code counts only assistant `tool_use` entries with `name == "Skill"` and `input.skill` present. Do not infer calls from plain text skill mentions or try to split explicit slash vs model-selected calls unless transcript samples expose a stable source field.
 
 **Privacy boundary.** The DB stores only skill name/path, session/turn ids, source file + offset, tool call id, timestamps, confidence. Never persist prompts, assistant messages, tool output, `SKILL.md` body, or full shell commands. If debugging command detection, write to a temp file, not the main DB.
 

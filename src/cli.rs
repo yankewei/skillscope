@@ -10,6 +10,9 @@ pub struct Cli {
     pub codex_home: Option<PathBuf>,
 
     #[arg(long, global = true)]
+    pub claude_home: Option<PathBuf>,
+
+    #[arg(long, global = true)]
     pub agents_home: Option<PathBuf>,
 
     #[arg(long, global = true)]

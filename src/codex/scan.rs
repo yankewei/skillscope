@@ -209,9 +209,10 @@ mod tests {
         let db_path = tmp.path().join("skillscope.sqlite");
         Fixture {
             _tmp: tmp,
-            root,
+            root: root.clone(),
             config: Config {
                 codex_home,
+                claude_home: root.join(".claude"),
                 agents_home,
                 db_path: db_path.clone(),
             },

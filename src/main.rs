@@ -1,3 +1,4 @@
+mod claude;
 mod cli;
 mod codex;
 mod config;
@@ -29,7 +30,12 @@ fn run() -> Result<()> {
 
     match cli.command {
         Command::Scan(args) => {
-            let result = codex::scan::scan_all(&mut db, &config, args.rescan)?;
+            let mut result = codex::scan::scan_all(&mut db, &config, args.rescan)?;
+            let claude_result = claude::scan::scan_all(&mut db, &config, args.rescan)?;
+            result.files_scanned += claude_result.files_scanned;
+            result.events_inserted += claude_result.events_inserted;
+            result.errors += claude_result.errors;
+            result.events.extend(claude_result.events);
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
