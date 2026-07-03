@@ -1,4 +1,5 @@
 use crate::claude::parser::parse_line;
+use crate::codex::registry::SkillRegistry;
 use crate::codex::scan::ScanResult;
 use crate::config::Config;
 use crate::db::{Database, ParsedFile};
@@ -12,9 +13,19 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 pub fn scan_all(db: &mut Database, config: &Config, rescan: bool) -> Result<ScanResult> {
+    let registry = SkillRegistry::scan(config)?;
+    scan_all_with_registry(db, config, &registry, rescan)
+}
+
+pub fn scan_all_with_registry(
+    db: &mut Database,
+    config: &Config,
+    registry: &SkillRegistry,
+    rescan: bool,
+) -> Result<ScanResult> {
     let mut result = ScanResult::default();
     for file in project_files(config)? {
-        let file_result = scan_file(db, &file, rescan)?;
+        let file_result = scan_file(db, &file, registry, rescan)?;
         result.files_scanned += 1;
         result.events_inserted += file_result.events_inserted;
         result.errors += file_result.errors;
@@ -45,13 +56,18 @@ pub fn project_files(config: &Config) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-struct FileScanResult {
-    events_inserted: u64,
-    errors: u64,
-    events: Vec<SkillInvocation>,
+pub struct FileScanResult {
+    pub events_inserted: u64,
+    pub errors: u64,
+    pub events: Vec<SkillInvocation>,
 }
 
-fn scan_file(db: &mut Database, path: &Path, rescan: bool) -> Result<FileScanResult> {
+pub fn scan_file(
+    db: &mut Database,
+    path: &Path,
+    registry: &SkillRegistry,
+    rescan: bool,
+) -> Result<FileScanResult> {
     let metadata = fs::metadata(path)?;
     let file_size = metadata.len();
     let modified_at = metadata
@@ -106,7 +122,7 @@ fn scan_file(db: &mut Database, path: &Path, rescan: bool) -> Result<FileScanRes
             continue;
         }
 
-        match parse_line(trimmed, path, source_offset, current_line) {
+        match parse_line(trimmed, path, source_offset, current_line, registry) {
             Ok(events) => {
                 for event in events {
                     if db.insert_invocation(&event)? {

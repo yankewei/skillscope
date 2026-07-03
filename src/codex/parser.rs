@@ -305,6 +305,7 @@ mod tests {
             scripts_dir: PathBuf::from("/tmp/skills/diagnose/scripts"),
             scope: "agent".to_string(),
             plugin_id: None,
+            plugin_name: None,
         }])
     }
 

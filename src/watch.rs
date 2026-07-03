@@ -18,7 +18,10 @@ pub fn run(
 ) -> Result<()> {
     let mut registry = SkillRegistry::scan(config)?;
     let mut initial = scan_all_with_registry(db, config, &registry, false)?;
-    merge_scan_result(&mut initial, claude_scan::scan_all(db, config, false)?);
+    merge_scan_result(
+        &mut initial,
+        claude_scan::scan_all_with_registry(db, config, &registry, false)?,
+    );
     println!(
         "initial scan: {} files, {} new skill invocations",
         initial.files_scanned, initial.events_inserted
@@ -79,7 +82,10 @@ pub fn run(
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 registry = SkillRegistry::scan(config)?;
                 let mut result = scan_all_with_registry(db, config, &registry, false)?;
-                merge_scan_result(&mut result, claude_scan::scan_all(db, config, false)?);
+                merge_scan_result(
+                    &mut result,
+                    claude_scan::scan_all_with_registry(db, config, &registry, false)?,
+                );
                 if result.events_inserted > 0 || result.errors > 0 {
                     println!(
                         "poll scan: {} files, {} new skill invocations, {} errors",

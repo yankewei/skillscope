@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::paths::{normalize_for_compare, path_to_key};
 use serde::Serialize;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,7 @@ pub struct SkillInfo {
     pub scripts_dir: PathBuf,
     pub scope: String,
     pub plugin_id: Option<String>,
+    pub plugin_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -28,8 +30,27 @@ impl SkillRegistry {
         let mut registry = Self::default();
         registry.scan_root(&config.codex_home.join("skills"), "user", None)?;
         registry.scan_root(&config.agents_home.join("skills"), "agent", None)?;
-        registry.scan_plugin_cache(&config.codex_home.join("plugins").join("cache"))?;
+        registry.scan_plugin_cache(&config.codex_home.join("plugins").join("cache"), "plugin")?;
+        registry.scan_root(&config.claude_home.join("skills"), "claude_user", None)?;
+        registry.scan_plugin_cache(
+            &config.claude_home.join("plugins").join("cache"),
+            "claude_plugin",
+        )?;
         Ok(registry)
+    }
+
+    pub fn match_claude_slash_command(&self, command: &str) -> Option<&SkillInfo> {
+        if let Some((plugin_name, skill_name)) = command.split_once(':') {
+            self.skills.iter().find(|skill| {
+                skill.scope == "claude_plugin"
+                    && skill.plugin_name.as_deref() == Some(plugin_name)
+                    && skill.name == skill_name
+            })
+        } else {
+            self.skills.iter().find(|skill| {
+                matches!(skill.scope.as_str(), "agent" | "claude_user") && skill.name == command
+            })
+        }
     }
 
     #[cfg(test)]
@@ -90,12 +111,13 @@ impl SkillRegistry {
                 skill_dir,
                 scope: scope.to_string(),
                 plugin_id: plugin_id.clone(),
+                plugin_name: None,
             });
         }
         Ok(())
     }
 
-    fn scan_plugin_cache(&mut self, root: &Path) -> Result<()> {
+    fn scan_plugin_cache(&mut self, root: &Path, scope: &str) -> Result<()> {
         if !root.exists() {
             return Ok(());
         }
@@ -108,6 +130,9 @@ impl SkillRegistry {
                 continue;
             }
             let plugin_id = plugin_id_from_cache_path(root, entry.path());
+            let plugin_name = plugin_id
+                .as_ref()
+                .and_then(|id| plugin_name_for_id(root, id));
             let skill_path = normalize_for_compare(entry.path());
             let Some(skill_dir) = skill_path.parent().map(Path::to_path_buf) else {
                 continue;
@@ -123,8 +148,9 @@ impl SkillRegistry {
                 skill_path,
                 scripts_dir: skill_dir.join("scripts"),
                 skill_dir,
-                scope: "plugin".to_string(),
+                scope: scope.to_string(),
                 plugin_id,
+                plugin_name,
             });
         }
         Ok(())
@@ -180,4 +206,17 @@ fn plugin_id_from_cache_path(root: &Path, skill_path: &Path) -> Option<String> {
     } else {
         Some(parts.join("/"))
     }
+}
+
+fn plugin_name_for_id(root: &Path, plugin_id: &str) -> Option<String> {
+    let manifest = root
+        .join(plugin_id)
+        .join(".claude-plugin")
+        .join("plugin.json");
+    let text = fs::read_to_string(&manifest).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    value
+        .get("name")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
 }

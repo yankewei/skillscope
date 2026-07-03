@@ -7,7 +7,7 @@
 第一版实现一个本地 CLI，可以：
 
 - 扫描 Codex 本地 session JSONL 和 Claude Code 本地 project JSONL。
-- 识别 Codex 显式 Skill 注入、Codex 隐式 Skill 命令命中，以及 Claude Code `Skill` tool use。
+- 识别 Codex 显式 Skill 注入、Codex 隐式 Skill 命令命中、Claude Code 显式 skill slash command，以及 Claude Code `Skill` tool use。
 - 将归一化调用事件写入 SQLite。
 - 持久化每个日志文件的解析游标，支持增量扫描。
 - 提供接近实时的 watch 模式，持续监控新增 session 文件和追加内容。
@@ -143,13 +143,13 @@ src/
 - `cli`：命令行参数和子命令分发。
 - `config`：解析默认路径、用户参数和环境变量。
 - `db`：SQLite schema、migration、读写事务。
-- `codex::registry`：扫描本机 Skill 注册表。
+- `codex::registry`：扫描本机 Skill 注册表（Codex home、agents home、Claude home 及各自的 plugins cache）。
 - `codex::scan`：发现 Codex session JSONL 文件，处理文件游标，执行增量解析。
 - `codex::parser`：把 JSONL 行转换为候选事件。
 - `codex::command_detection`：复现 Codex 隐式 Skill 命令判定。
 - `codex::doctor`：输出本地配置和索引健康状态。
 - `claude::scan`：发现 Claude Code project JSONL 文件，处理文件游标，执行增量解析。
-- `claude::parser`：识别 Claude Code assistant `Skill` tool use。
+- `claude::parser`：识别 Claude Code 显式 skill slash command 和 assistant `Skill` tool use。
 - `events`：归一化事件类型和去重 key。
 - `stats`：聚合查询。
 - `watch`：文件监听和增量调度。
