@@ -3,7 +3,7 @@ use crate::codex::registry::SkillRegistry;
 use crate::config::Config;
 use crate::db::{Database, ParsedFile};
 use crate::error::Result;
-use crate::events::SessionState;
+use crate::events::{SessionState, SkillInvocation};
 use crate::paths::normalize_for_compare;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -17,6 +17,7 @@ pub struct ScanResult {
     pub files_scanned: u64,
     pub events_inserted: u64,
     pub errors: u64,
+    pub events: Vec<SkillInvocation>,
 }
 
 pub fn scan_all(db: &mut Database, config: &Config, rescan: bool) -> Result<ScanResult> {
@@ -36,6 +37,7 @@ pub fn scan_all_with_registry(
         result.files_scanned += 1;
         result.events_inserted += file_result.events_inserted;
         result.errors += file_result.errors;
+        result.events.extend(file_result.events);
     }
     Ok(result)
 }
@@ -65,6 +67,7 @@ pub fn session_files(config: &Config) -> Result<Vec<PathBuf>> {
 pub struct FileScanResult {
     pub events_inserted: u64,
     pub errors: u64,
+    pub events: Vec<SkillInvocation>,
 }
 
 pub fn scan_file(
@@ -113,6 +116,7 @@ pub fn scan_file(
     let mut result = FileScanResult {
         events_inserted: 0,
         errors: 0,
+        events: Vec::new(),
     };
     let mut last_error = None;
 
@@ -139,6 +143,7 @@ pub fn scan_file(
                 for event in events {
                     if db.insert_invocation(&event)? {
                         result.events_inserted += 1;
+                        result.events.push(event);
                     }
                 }
             }
@@ -233,9 +238,13 @@ mod tests {
         db.init().unwrap();
         let first = scan_all(&mut db, &fixture.config, false).unwrap();
         assert_eq!(first.events_inserted, 2);
+        assert_eq!(first.events.len(), 2);
+        assert_eq!(first.events[0].invocation_type, "explicit");
+        assert_eq!(first.events[1].invocation_type, "implicit");
 
         let second = scan_all(&mut db, &fixture.config, false).unwrap();
         assert_eq!(second.events_inserted, 0);
+        assert!(second.events.is_empty());
     }
 
     #[test]
