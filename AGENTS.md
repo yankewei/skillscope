@@ -18,7 +18,7 @@ CI (`.github/workflows/ci.yml`) runs fmt → clippy → test on ubuntu-latest wi
 
 Single Rust crate (no workspace), 2021 edition. `Cargo.lock` is committed (binary crate). The app is daemon-first: `skillscope daemon` runs the local axum/tokio backend, owns scanning/query execution, and the CLI-facing commands call that daemon rather than falling back to direct DB access.
 
-Entry flow: `main.rs` dispatches `daemon` plus client commands (`scan`/`stats`/`doctor`). `daemon start/status/stop` manages the local daemon process/control plane. Continuous watching belongs to the daemon, not a separate CLI command. Global flags include `--codex-home`, `--claude-home`, `--agents-home`, `--db`, and `--service-url`.
+Entry flow: `main.rs` dispatches `daemon` plus client commands (`scan`/`stats`/`doctor`). Bare `daemon` defaults to `daemon start` and returns after launching the background process; `daemon run` is the explicit foreground mode. `daemon start/status/stop` manages the local daemon process/control plane. Continuous watching belongs to the daemon, not a separate CLI command. Global flags include `--codex-home`, `--claude-home`, `--agents-home`, `--db`, and `--service-url`.
 
 - `codex/scan.rs` — incremental JSONL parser. Per-file `byte_offset` cursor lives in the `parsed_files` SQLite table.
 - `codex/parser.rs` — turns JSONL lines into `SkillInvocation` events; updates lightweight session state (`session_id`/`turn_id`/`cwd`).

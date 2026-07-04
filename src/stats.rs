@@ -32,27 +32,18 @@ pub fn print_skill_stats_rows(stats: Vec<SkillStat>, json: bool) -> Result<()> {
     }
 
     println!(
-        "{:<32} {:>8} {:>8} {:>12} {:>9} {:>9} {:>10} {:<25} {:<25}",
-        "skill",
-        "total",
-        "codex",
-        "claude_code",
-        "explicit",
-        "implicit",
-        "skill_tool",
-        "first_seen",
-        "last_seen"
+        "{:<32} {:>8} {:>8} {:>12} {:>9} {:>9} {:<25} {:<25}",
+        "skill", "total", "codex", "claude_code", "explicit", "implicit", "first_seen", "last_seen"
     );
     for stat in stats {
         println!(
-            "{:<32} {:>8} {:>8} {:>12} {:>9} {:>9} {:>10} {:<25} {:<25}",
+            "{:<32} {:>8} {:>8} {:>12} {:>9} {:>9} {:<25} {:<25}",
             stat.skill_name,
             stat.total,
             stat.codex,
             stat.claude_code,
             stat.explicit,
             stat.implicit,
-            stat.skill,
             stat.first_seen.unwrap_or_default(),
             stat.last_seen.unwrap_or_default()
         );

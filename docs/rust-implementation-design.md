@@ -23,6 +23,7 @@
 ```text
 skillscope daemon
 skillscope daemon start
+skillscope daemon run
 skillscope daemon status
 skillscope daemon stop
 skillscope scan
@@ -46,7 +47,7 @@ skillscope doctor
 
 ### `daemon`
 
-启动本地后端 daemon。默认 `skillscope daemon` 在前台运行，用于开发、调试或进程管理器托管；`skillscope daemon start` 会在后台启动同一个 binary 的 daemon 模式；`status` / `stop` 通过本地控制面检查或停止 daemon。服务监听本地 HTTP，持有 SQLite，并启动文件 watcher。
+启动本地后端 daemon。`skillscope daemon` 和 `skillscope daemon start` 都会在后台启动同一个 binary 的 daemon 模式；`skillscope daemon run` 在前台运行，用于开发、调试或进程管理器托管；`status` / `stop` 通过本地控制面检查或停止 daemon。服务监听本地 HTTP，持有 SQLite，并启动文件 watcher。
 
 常用参数：
 
@@ -96,7 +97,6 @@ skillscope stats --json
 - Claude Code 调用数
 - 显式调用数
 - 隐式调用数
-- Claude Code Skill tool 调用数
 - 首次出现时间
 - 最近出现时间
 

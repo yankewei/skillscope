@@ -81,7 +81,7 @@ fn run() -> Result<()> {
 }
 
 fn run_daemon_command(cli: &Cli, config: Config, args: DaemonArgs) -> Result<()> {
-    match args.command.clone().unwrap_or(DaemonCommand::Run) {
+    match daemon_command(&args) {
         DaemonCommand::Run => {
             let runtime = tokio::runtime::Runtime::new()?;
             runtime.block_on(server::run(
@@ -104,6 +104,10 @@ fn run_daemon_command(cli: &Cli, config: Config, args: DaemonArgs) -> Result<()>
         }
     }
     Ok(())
+}
+
+fn daemon_command(args: &DaemonArgs) -> DaemonCommand {
+    args.command.clone().unwrap_or(DaemonCommand::Start)
 }
 
 fn start_daemon(cli: &Cli, config: &Config, args: &DaemonArgs) -> Result<()> {
@@ -129,14 +133,8 @@ fn start_daemon(cli: &Cli, config: &Config, args: &DaemonArgs) -> Result<()> {
 
     let mut command = ProcessCommand::new(exe);
     add_global_args(&mut command, cli);
+    add_daemon_run_args(&mut command, args);
     command
-        .arg("daemon")
-        .arg("--addr")
-        .arg(args.addr.to_string())
-        .arg("--poll-interval")
-        .arg(format_duration(args.poll_interval))
-        .arg("--debounce")
-        .arg(format_duration(args.debounce))
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(err_log))
         .stdin(Stdio::null());
@@ -166,6 +164,18 @@ fn add_global_args(command: &mut ProcessCommand, cli: &Cli) {
         command.arg("--db").arg(path);
     }
     command.arg("--service-url").arg(&cli.service_url);
+}
+
+fn add_daemon_run_args(command: &mut ProcessCommand, args: &DaemonArgs) {
+    command
+        .arg("daemon")
+        .arg("--addr")
+        .arg(args.addr.to_string())
+        .arg("--poll-interval")
+        .arg(format_duration(args.poll_interval))
+        .arg("--debounce")
+        .arg(format_duration(args.debounce))
+        .arg("run");
 }
 
 fn detach_daemon_process(command: &mut ProcessCommand) {
@@ -203,5 +213,53 @@ fn format_duration(duration: Duration) -> String {
         format!("{}s", duration.as_secs())
     } else {
         format!("{}ms", duration.as_millis())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bare_daemon_defaults_to_background_start() {
+        let args = DaemonArgs {
+            addr: "127.0.0.1:3766".parse().unwrap(),
+            poll_interval: Duration::from_secs(30),
+            debounce: Duration::from_millis(300),
+            command: None,
+        };
+
+        assert!(matches!(daemon_command(&args), DaemonCommand::Start));
+    }
+
+    #[test]
+    fn start_spawns_foreground_run_subcommand() {
+        let args = DaemonArgs {
+            addr: "127.0.0.1:3766".parse().unwrap(),
+            poll_interval: Duration::from_secs(30),
+            debounce: Duration::from_millis(300),
+            command: Some(DaemonCommand::Start),
+        };
+        let mut command = ProcessCommand::new("skillscope");
+
+        add_daemon_run_args(&mut command, &args);
+
+        let actual = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            vec![
+                "daemon",
+                "--addr",
+                "127.0.0.1:3766",
+                "--poll-interval",
+                "30s",
+                "--debounce",
+                "300ms",
+                "run"
+            ]
+        );
     }
 }
