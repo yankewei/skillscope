@@ -10,7 +10,7 @@
 - 识别 Codex 显式 Skill 注入、Codex 隐式 Skill 命令命中、Claude Code 显式 skill slash command，以及 Claude Code `Skill` tool use。
 - 将归一化调用事件写入 SQLite。
 - 持久化每个日志文件的解析游标，支持增量扫描。
-- `skillscope daemon` 作为本地后端运行时，负责 scan/watch/index/query。
+- `skillscope daemon` 作为本地后端运行时，负责 scan/index/query，并在后台管理文件监听。
 - CLI 子命令作为服务客户端，不在服务未运行时 fallback 到直接读写 DB。
 - 输出基础统计，例如按 Skill、按调用类型、按时间范围聚合。
 
@@ -74,10 +74,6 @@ skillscope doctor
 --rescan                忽略文件游标，重新扫描并依赖事件唯一键去重
 ```
 
-### `watch`
-
-兼容命令。watch 生命周期由 `skillscope daemon` 管理；直接运行 `skillscope watch` 会提示启动 daemon。
-
 ### `stats`
 
 从 SQLite 查询统计结果。
@@ -96,8 +92,11 @@ skillscope stats --json
 
 - Skill 名称
 - 调用总数
+- Codex 调用数
+- Claude Code 调用数
 - 显式调用数
 - 隐式调用数
+- Claude Code Skill tool 调用数
 - 首次出现时间
 - 最近出现时间
 
@@ -403,9 +402,9 @@ pwsh
 
 只有能定位到单个注册表 Skill 时才生成 `implicit_skill_command` 事件。
 
-## watch 语义
+## daemon watcher 语义
 
-`watch` 使用 `notify` 监听 `~/.codex/sessions`。
+daemon 内部 watcher 使用 `notify` 监听 `~/.codex/sessions`、`~/.claude/projects`、Skill 目录和插件缓存。
 
 处理规则：
 
@@ -497,7 +496,7 @@ ORDER BY total_count DESC, skill_name ASC;
 - 第一次 `scan` 写入事件和游标。
 - 第二次 `scan` 不重复写入。
 - 向 JSONL 追加新事件后，再次 `scan` 只写新事件。
-- `watch` 在新文件出现后写入事件。
+- daemon watcher 在新文件出现后写入事件。
 - `stats` 输出正确聚合。
 
 ## 实现顺序
@@ -508,7 +507,7 @@ ORDER BY total_count DESC, skill_name ASC;
 4. 实现显式 `<skill>` 注入检测。
 5. 实现隐式命令检测。
 6. 实现 `scan` 和 `stats`。
-7. 加入 `watch`。
+7. 加入 daemon watcher。
 8. 补齐 `doctor` 和错误报告。
 
-每一步都应保持命令可运行、测试可通过。`watch` 不是 `scan` 的前置条件，`scan + stats` 应先成为可用版本。
+每一步都应保持命令可运行、测试可通过。daemon watcher 不是 `scan` 的前置条件，`scan + stats` 应先成为可用版本。

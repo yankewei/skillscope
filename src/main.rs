@@ -57,11 +57,6 @@ fn run() -> Result<()> {
                 );
             }
         }
-        Command::Watch(_) => {
-            return Err(SkillScopeError::Service(
-                "`watch` is managed by `skillscope daemon`; start the daemon instead".to_string(),
-            ));
-        }
         Command::Stats(args) => {
             let client = ServiceClient::new(service_url);
             match args.group_by {

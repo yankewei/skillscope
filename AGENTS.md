@@ -16,9 +16,9 @@ CI (`.github/workflows/ci.yml`) runs fmt → clippy → test on ubuntu-latest wi
 
 ## Architecture
 
-Single Rust crate (no workspace), 2021 edition. `Cargo.lock` is committed (binary crate). The app is now daemon-first: `skillscope daemon` runs the local axum/tokio backend, owns scanning/query execution, and the CLI-facing commands call that daemon rather than falling back to direct DB access. `serve` is retained as an alias for now.
+Single Rust crate (no workspace), 2021 edition. `Cargo.lock` is committed (binary crate). The app is daemon-first: `skillscope daemon` runs the local axum/tokio backend, owns scanning/query execution, and the CLI-facing commands call that daemon rather than falling back to direct DB access.
 
-Entry flow: `main.rs` dispatches `daemon` plus client commands (`scan`/`stats`/`doctor`). `daemon start/status/stop` manages the local daemon process/control plane. `watch` is retained as a compatibility command that tells users to run `daemon`; continuous watching belongs to the daemon. Global flags include `--codex-home`, `--claude-home`, `--agents-home`, `--db`, and `--service-url`.
+Entry flow: `main.rs` dispatches `daemon` plus client commands (`scan`/`stats`/`doctor`). `daemon start/status/stop` manages the local daemon process/control plane. Continuous watching belongs to the daemon, not a separate CLI command. Global flags include `--codex-home`, `--claude-home`, `--agents-home`, `--db`, and `--service-url`.
 
 - `codex/scan.rs` — incremental JSONL parser. Per-file `byte_offset` cursor lives in the `parsed_files` SQLite table.
 - `codex/parser.rs` — turns JSONL lines into `SkillInvocation` events; updates lightweight session state (`session_id`/`turn_id`/`cwd`).
@@ -46,7 +46,7 @@ Entry flow: `main.rs` dispatches `daemon` plus client commands (`scan`/`stats`/`
 
 **Privacy boundary.** The DB stores only skill name/path, session/turn ids, source file + offset, tool call id, timestamps, confidence. Never persist prompts, assistant messages, tool output, `SKILL.md` body, or full shell commands. If debugging command detection, write to a temp file, not the main DB.
 
-## Watch internals
+## Daemon watcher internals
 
 `skillscope daemon` starts the backend and a watcher. `watch.rs` builds the `SkillRegistry` once, then on each `notify` event drains the channel until quiet for `--debounce` (real coalescing), refreshes the registry first if skill/plugin paths changed, then calls the correct Codex or Claude `scan_file` for changed `.jsonl` paths. A poll fallback (default 30s) runs `scan_all_with_registry` to catch missed events.
 

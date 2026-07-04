@@ -290,6 +290,8 @@ mod tests {
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].skill_name, "diagnose");
         assert_eq!(stats[0].total, 1);
+        assert_eq!(stats[0].codex, 1);
+        assert_eq!(stats[0].claude_code, 0);
     }
 
     #[tokio::test]
@@ -321,6 +323,8 @@ mod tests {
             assert_eq!(stats.len(), 1);
             assert_eq!(stats[0].skill_name, "diagnose");
             assert_eq!(stats[0].total, 1);
+            assert_eq!(stats[0].codex, 1);
+            assert_eq!(stats[0].claude_code, 0);
         })
         .await
         .unwrap();

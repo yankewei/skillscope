@@ -28,10 +28,8 @@ pub struct Cli {
 
 #[derive(Clone, Debug, Subcommand)]
 pub enum Command {
-    #[command(alias = "serve")]
     Daemon(DaemonArgs),
     Scan(ScanArgs),
-    Watch(WatchArgs),
     Stats(StatsArgs),
     Doctor(DoctorArgs),
 }
@@ -66,15 +64,6 @@ pub struct ScanArgs {
 
     #[arg(long)]
     pub rescan: bool,
-}
-
-#[derive(Clone, Debug, Args)]
-pub struct WatchArgs {
-    #[arg(long, value_parser = parse_duration, default_value = "30s")]
-    pub poll_interval: Duration,
-
-    #[arg(long, value_parser = parse_duration, default_value = "300ms")]
-    pub debounce: Duration,
 }
 
 #[derive(Clone, Debug, Args)]
