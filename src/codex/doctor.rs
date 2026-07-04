@@ -4,30 +4,31 @@ use crate::codex::scan::session_files;
 use crate::config::Config;
 use crate::db::Database;
 use crate::error::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize)]
-struct DoctorReport {
-    codex_home: String,
-    codex_home_exists: bool,
-    sessions_dir: String,
-    sessions_dir_exists: bool,
-    session_files: usize,
-    claude_home: String,
-    claude_home_exists: bool,
-    claude_projects_dir: String,
-    claude_projects_dir_exists: bool,
-    claude_project_files: usize,
-    parsed_files: u64,
-    codex_skills_found: usize,
-    latest_parse_error: Option<String>,
+#[derive(Debug, Deserialize, Serialize)]
+pub struct DoctorReport {
+    pub codex_home: String,
+    pub codex_home_exists: bool,
+    pub sessions_dir: String,
+    pub sessions_dir_exists: bool,
+    pub session_files: usize,
+    pub claude_home: String,
+    pub claude_home_exists: bool,
+    pub claude_projects_dir: String,
+    pub claude_projects_dir_exists: bool,
+    pub claude_project_files: usize,
+    pub parsed_files: u64,
+    pub codex_skills_found: usize,
+    pub registry_diagnostics: Vec<String>,
+    pub latest_parse_error: Option<String>,
 }
 
-pub fn run(db: &Database, config: &Config, json: bool) -> Result<()> {
+pub fn report(db: &Database, config: &Config) -> Result<DoctorReport> {
     let registry = SkillRegistry::scan(config)?;
     let session_files = session_files(config)?;
     let claude_project_files = project_files(config)?;
-    let report = DoctorReport {
+    Ok(DoctorReport {
         codex_home: config.codex_home.to_string_lossy().into_owned(),
         codex_home_exists: config.codex_home.exists(),
         sessions_dir: config.sessions_dir().to_string_lossy().into_owned(),
@@ -40,9 +41,12 @@ pub fn run(db: &Database, config: &Config, json: bool) -> Result<()> {
         claude_project_files: claude_project_files.len(),
         parsed_files: db.parsed_file_count()?,
         codex_skills_found: registry.len(),
+        registry_diagnostics: registry.diagnostics().to_vec(),
         latest_parse_error: db.latest_parse_error()?,
-    };
+    })
+}
 
+pub fn print_report(report: DoctorReport, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
@@ -72,6 +76,9 @@ pub fn run(db: &Database, config: &Config, json: bool) -> Result<()> {
     println!("claude_project_files: {}", report.claude_project_files);
     println!("parsed_files: {}", report.parsed_files);
     println!("codex_skills_found: {}", report.codex_skills_found);
+    for diagnostic in report.registry_diagnostics {
+        println!("registry_diagnostic: {diagnostic}");
+    }
     if let Some(error) = report.latest_parse_error {
         println!("latest_parse_error: {error}");
     }

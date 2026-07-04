@@ -1,44 +1,30 @@
-use crate::cli::GroupBy;
 use crate::db::Database;
 use crate::error::Result;
 use rusqlite::params;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize)]
-struct SkillStat {
-    runtime: String,
-    skill_name: String,
-    total: u64,
-    explicit: u64,
-    implicit: u64,
-    skill: u64,
-    first_seen: Option<String>,
-    last_seen: Option<String>,
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SkillStat {
+    pub runtime: String,
+    pub skill_name: String,
+    pub total: u64,
+    pub explicit: u64,
+    pub implicit: u64,
+    pub skill: u64,
+    pub first_seen: Option<String>,
+    pub last_seen: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct InvocationTypeStat {
-    runtime: String,
-    invocation_type: String,
-    total: u64,
-    first_seen: Option<String>,
-    last_seen: Option<String>,
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InvocationTypeStat {
+    pub runtime: String,
+    pub invocation_type: String,
+    pub total: u64,
+    pub first_seen: Option<String>,
+    pub last_seen: Option<String>,
 }
 
-pub fn print_stats(
-    db: &Database,
-    group_by: GroupBy,
-    since: Option<String>,
-    json: bool,
-) -> Result<()> {
-    match group_by {
-        GroupBy::Skill => print_skill_stats(db, since, json),
-        GroupBy::InvocationType => print_invocation_type_stats(db, since, json),
-    }
-}
-
-fn print_skill_stats(db: &Database, since: Option<String>, json: bool) -> Result<()> {
-    let stats = skill_stats(db, since.as_deref())?;
+pub fn print_skill_stats_rows(stats: Vec<SkillStat>, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&stats)?);
         return Ok(());
@@ -64,8 +50,7 @@ fn print_skill_stats(db: &Database, since: Option<String>, json: bool) -> Result
     Ok(())
 }
 
-fn print_invocation_type_stats(db: &Database, since: Option<String>, json: bool) -> Result<()> {
-    let stats = invocation_type_stats(db, since.as_deref())?;
+pub fn print_invocation_type_stats_rows(stats: Vec<InvocationTypeStat>, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&stats)?);
         return Ok(());
@@ -88,7 +73,7 @@ fn print_invocation_type_stats(db: &Database, since: Option<String>, json: bool)
     Ok(())
 }
 
-fn skill_stats(db: &Database, since: Option<&str>) -> Result<Vec<SkillStat>> {
+pub fn skill_stats(db: &Database, since: Option<&str>) -> Result<Vec<SkillStat>> {
     let sql = if since.is_some() {
         r#"
         SELECT
@@ -133,7 +118,10 @@ fn skill_stats(db: &Database, since: Option<&str>) -> Result<Vec<SkillStat>> {
     Ok(rows)
 }
 
-fn invocation_type_stats(db: &Database, since: Option<&str>) -> Result<Vec<InvocationTypeStat>> {
+pub fn invocation_type_stats(
+    db: &Database,
+    since: Option<&str>,
+) -> Result<Vec<InvocationTypeStat>> {
     let sql = if since.is_some() {
         r#"
         SELECT runtime, invocation_type, COUNT(*) AS total_count, MIN(timestamp), MAX(timestamp)

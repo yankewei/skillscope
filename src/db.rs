@@ -5,6 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ParsedFile {
@@ -31,9 +32,9 @@ impl Database {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        Ok(Self {
-            conn: Connection::open(path)?,
-        })
+        let conn = Connection::open(path)?;
+        conn.busy_timeout(Duration::from_secs(5))?;
+        Ok(Self { conn })
     }
 
     pub fn init(&mut self) -> Result<()> {
@@ -101,6 +102,41 @@ impl Database {
         self.conn.execute(
             "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, ?1)",
             params![Utc::now().to_rfc3339()],
+        )?;
+        if !self.migration_applied(3)? {
+            self.migrate_tool_call_ids_into_invocation_ids()?;
+            self.conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, ?1)",
+                params![Utc::now().to_rfc3339()],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn migration_applied(&self, version: i64) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT 1 FROM schema_migrations WHERE version = ?1",
+                params![version],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    fn migrate_tool_call_ids_into_invocation_ids(&self) -> Result<()> {
+        self.conn.execute(
+            r#"
+            UPDATE OR IGNORE skill_invocations
+            SET id = runtime || ':' || source_file || ':' || source_offset || ':' ||
+              trigger_source || ':' || COALESCE(skill_path, skill_name) || ':' || tool_call_id
+            WHERE tool_call_id IS NOT NULL
+              AND tool_call_id != ''
+              AND id != runtime || ':' || source_file || ':' || source_offset || ':' ||
+                trigger_source || ':' || COALESCE(skill_path, skill_name) || ':' || tool_call_id
+            "#,
+            [],
         )?;
         Ok(())
     }
@@ -258,5 +294,51 @@ impl Database {
 
     pub fn connection(&self) -> &Connection {
         &self.conn
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_migrates_existing_tool_call_invocation_ids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("skillscope.sqlite");
+        let mut db = Database::open(&db_path).unwrap();
+        db.init().unwrap();
+        db.conn
+            .execute("DELETE FROM schema_migrations WHERE version = 3", [])
+            .unwrap();
+        db.conn
+            .execute(
+                r#"
+                INSERT INTO skill_invocations (
+                  id, runtime, source, trigger_source, invocation_type, skill_name,
+                  skill_path, skill_scope, plugin_id, session_id, turn_id,
+                  source_file, source_offset, source_line, tool_call_id,
+                  timestamp, confidence, created_at
+                ) VALUES (
+                  'claude_code:/tmp/session.jsonl:42:claude_skill_tool:think',
+                  'claude_code', 'claude_project_jsonl', 'claude_skill_tool', 'skill', 'think',
+                  NULL, NULL, NULL, 'session_1', NULL,
+                  '/tmp/session.jsonl', 42, 1, 'toolu_1',
+                  '2026-07-03T00:00:00Z', 1.0, '2026-07-03T00:00:00Z'
+                )
+                "#,
+                [],
+            )
+            .unwrap();
+
+        db.init().unwrap();
+
+        let id: String = db
+            .conn
+            .query_row("SELECT id FROM skill_invocations", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            id,
+            "claude_code:/tmp/session.jsonl:42:claude_skill_tool:think:toolu_1"
+        );
     }
 }

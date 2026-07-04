@@ -6,7 +6,7 @@ Compact guidance for OpenCode sessions working in this repo. Code is the source 
 
 ```sh
 cargo build
-cargo test --all-targets --all-features        # 17 unit tests, no integration binary
+cargo test --all-targets --all-features        # unit tests, no integration binary
 cargo test <name_substring>                     # single test, e.g. `cargo test scan_is_incremental`
 cargo clippy --all-targets --all-features -- -D warnings   # CI treats warnings as errors
 cargo fmt --all -- --check                      # CI checks formatting; run `cargo fmt` before commit
@@ -16,9 +16,9 @@ CI (`.github/workflows/ci.yml`) runs fmt → clippy → test on ubuntu-latest wi
 
 ## Architecture
 
-Single Rust crate (no workspace), 2021 edition. `Cargo.lock` is committed (binary crate). No async runtime — `scan` and `watch` are intentionally synchronous; do not add `tokio` for this CLI.
+Single Rust crate (no workspace), 2021 edition. `Cargo.lock` is committed (binary crate). The app is now daemon-first: `skillscope daemon` runs the local axum/tokio backend, owns scanning/query execution, and the CLI-facing commands call that daemon rather than falling back to direct DB access. `serve` is retained as an alias for now.
 
-Entry flow: `main.rs` dispatches 4 subcommands (`scan`/`watch`/`stats`/`doctor`) with global flags `--codex-home`, `--claude-home`, `--agents-home`, `--db`.
+Entry flow: `main.rs` dispatches `daemon` plus client commands (`scan`/`stats`/`doctor`). `daemon start/status/stop` manages the local daemon process/control plane. `watch` is retained as a compatibility command that tells users to run `daemon`; continuous watching belongs to the daemon. Global flags include `--codex-home`, `--claude-home`, `--agents-home`, `--db`, and `--service-url`.
 
 - `codex/scan.rs` — incremental JSONL parser. Per-file `byte_offset` cursor lives in the `parsed_files` SQLite table.
 - `codex/parser.rs` — turns JSONL lines into `SkillInvocation` events; updates lightweight session state (`session_id`/`turn_id`/`cwd`).
@@ -26,7 +26,9 @@ Entry flow: `main.rs` dispatches 4 subcommands (`scan`/`watch`/`stats`/`doctor`)
 - `codex/registry.rs` — scans `~/.codex/skills`, `~/.agents/skills`, `~/.codex/plugins/cache/**/skills`, `~/.claude/skills`, `~/.claude/plugins/cache/**/skills` for `SKILL.md`. Plugin skills also read `plugin_name` from `.claude-plugin/plugin.json`.
 - `claude/parser.rs` — detects Claude Code `Skill` tool uses from `~/.claude/projects/**/*.jsonl`; it does not parse prompts or persist tool args.
 - `claude/scan.rs` — incremental Claude transcript scanner using the same `parsed_files.byte_offset` cursor semantics.
-- `watch.rs` — `notify` file watcher; calls `scan_file` per changed path (see below).
+- `server.rs` — axum HTTP backend (`/health`, `/scan`, `/stats/skills`, `/stats/invocation-types`, `/doctor`, `/shutdown`) and daemon lifecycle.
+- `client.rs` — small HTTP client used by CLI commands; it does not open SQLite or parse transcripts.
+- `watch.rs` — `notify` file watcher used by the service; calls `scan_file` per changed path (see below).
 
 ## Non-obvious gotchas
 
@@ -36,7 +38,7 @@ Entry flow: `main.rs` dispatches 4 subcommands (`scan`/`watch`/`stats`/`doctor`)
 
 **Incremental scan semantics (do not break).** `scan_file` seeks to `parsed_files.byte_offset` and reads only new bytes. The last incomplete line (no trailing `\n`) is stored in `partial_line` and `byte_offset` is NOT advanced past it — next scan re-reads from that offset. If `file_size < byte_offset` (truncation/rotation), offset resets to 0 and session state clears. Session state is persisted across incremental scans so relative script paths can resolve without re-reading earlier turns.
 
-**Event dedup.** `SkillInvocation.id = codex:{source_file}:{source_offset}:{trigger_source}:{skill_path_or_name}` with `INSERT OR IGNORE`. `--rescan` is safe — re-scanning never duplicates events.
+**Event dedup.** `SkillInvocation.id = {runtime}:{source_file}:{source_offset}:{trigger_source}:{skill_path_or_name}[:{tool_call_id}]` with `INSERT OR IGNORE`. The optional tool call id prevents same-line tool-use collisions. `--rescan` is safe — re-scanning never duplicates events.
 
 **Implicit detection is gated on `exec_command`.** `parser.rs` only runs command detection when `payload.name == "exec_command"`. Other shell/unified-exec tool names require real session samples before adding (see `docs/codex-skill-invocation-analytics.md`). `find ... -name SKILL.md` correctly does not count — path resolution + token filtering handle it.
 
@@ -46,7 +48,7 @@ Entry flow: `main.rs` dispatches 4 subcommands (`scan`/`watch`/`stats`/`doctor`)
 
 ## Watch internals
 
-`watch.rs` builds the `SkillRegistry` once, then on each `notify` event drains the channel until quiet for `--debounce` (real coalescing), then calls `scan_file` on each changed `.jsonl` path. A poll fallback (default 30s) runs `scan_all_with_registry` to catch missed events and refreshes the registry so newly installed skills are picked up. `scan_all` rebuilds the registry internally; `scan_all_with_registry` and `scan_file` are `pub` so watch can reuse a cached registry and scan a single file by event path.
+`skillscope daemon` starts the backend and a watcher. `watch.rs` builds the `SkillRegistry` once, then on each `notify` event drains the channel until quiet for `--debounce` (real coalescing), refreshes the registry first if skill/plugin paths changed, then calls the correct Codex or Claude `scan_file` for changed `.jsonl` paths. A poll fallback (default 30s) runs `scan_all_with_registry` to catch missed events.
 
 ## Testing
 

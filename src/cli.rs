@@ -1,8 +1,9 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
-#[derive(Debug, Parser)]
+#[derive(Clone, Debug, Parser)]
 #[command(name = "skillscope")]
 #[command(about = "Local Skill invocation analytics for agent session logs")]
 pub struct Cli {
@@ -18,19 +19,47 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub db: Option<PathBuf>,
 
+    #[arg(long, global = true, default_value = "http://127.0.0.1:3766")]
+    pub service_url: String,
+
     #[command(subcommand)]
     pub command: Command,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Clone, Debug, Subcommand)]
 pub enum Command {
+    #[command(alias = "serve")]
+    Daemon(DaemonArgs),
     Scan(ScanArgs),
     Watch(WatchArgs),
     Stats(StatsArgs),
     Doctor(DoctorArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Clone, Debug, Args)]
+pub struct DaemonArgs {
+    #[arg(long, default_value = "127.0.0.1:3766")]
+    pub addr: SocketAddr,
+
+    #[arg(long, value_parser = parse_duration, default_value = "30s")]
+    pub poll_interval: Duration,
+
+    #[arg(long, value_parser = parse_duration, default_value = "300ms")]
+    pub debounce: Duration,
+
+    #[command(subcommand)]
+    pub command: Option<DaemonCommand>,
+}
+
+#[derive(Clone, Debug, Subcommand)]
+pub enum DaemonCommand {
+    Run,
+    Start,
+    Status,
+    Stop,
+}
+
+#[derive(Clone, Debug, Args)]
 pub struct ScanArgs {
     #[arg(long)]
     pub json: bool,
@@ -39,7 +68,7 @@ pub struct ScanArgs {
     pub rescan: bool,
 }
 
-#[derive(Debug, Args)]
+#[derive(Clone, Debug, Args)]
 pub struct WatchArgs {
     #[arg(long, value_parser = parse_duration, default_value = "30s")]
     pub poll_interval: Duration,
@@ -48,7 +77,7 @@ pub struct WatchArgs {
     pub debounce: Duration,
 }
 
-#[derive(Debug, Args)]
+#[derive(Clone, Debug, Args)]
 pub struct StatsArgs {
     #[arg(long, value_enum, default_value = "skill")]
     pub group_by: GroupBy,
@@ -66,7 +95,7 @@ pub enum GroupBy {
     InvocationType,
 }
 
-#[derive(Debug, Args)]
+#[derive(Clone, Debug, Args)]
 pub struct DoctorArgs {
     #[arg(long)]
     pub json: bool,

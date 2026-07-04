@@ -4,24 +4,28 @@
 
 ## 目标
 
-第一版实现一个本地 CLI，可以：
+当前实现演进为本地后端服务 + 前端 CLI：
 
 - 扫描 Codex 本地 session JSONL 和 Claude Code 本地 project JSONL。
 - 识别 Codex 显式 Skill 注入、Codex 隐式 Skill 命令命中、Claude Code 显式 skill slash command，以及 Claude Code `Skill` tool use。
 - 将归一化调用事件写入 SQLite。
 - 持久化每个日志文件的解析游标，支持增量扫描。
-- 提供接近实时的 watch 模式，持续监控新增 session 文件和追加内容。
+- `skillscope daemon` 作为本地后端运行时，负责 scan/watch/index/query。
+- CLI 子命令作为服务客户端，不在服务未运行时 fallback 到直接读写 DB。
 - 输出基础统计，例如按 Skill、按调用类型、按时间范围聚合。
 
-暂不实现 dashboard、后台系统服务、远端同步或跨设备聚合。
+暂不实现 dashboard、远端同步或跨设备聚合。
 
 ## CLI 形态
 
 推荐命令：
 
 ```text
+skillscope daemon
+skillscope daemon start
+skillscope daemon status
+skillscope daemon stop
 skillscope scan
-skillscope watch
 skillscope stats
 skillscope doctor
 ```
@@ -35,13 +39,26 @@ skillscope doctor
 --claude-home <path>    默认 ~/.claude
 --agents-home <path>    默认 ~/.agents
 --db <path>             默认 <data_local_dir>/skillscope/skillscope.sqlite
+--service-url <url>     默认 http://127.0.0.1:3766
 ```
 
 `<data_local_dir>` 由 `dirs::data_local_dir` 决定：macOS 下为 `~/Library/Application Support`，Linux 下为 `~/.local/share`。可用 `skillscope doctor` 查看本机实际路径。
 
+### `daemon`
+
+启动本地后端 daemon。默认 `skillscope daemon` 在前台运行，用于开发、调试或进程管理器托管；`skillscope daemon start` 会在后台启动同一个 binary 的 daemon 模式；`status` / `stop` 通过本地控制面检查或停止 daemon。服务监听本地 HTTP，持有 SQLite，并启动文件 watcher。
+
+常用参数：
+
+```text
+--addr <addr>                 默认 127.0.0.1:3766
+--poll-interval <duration>    默认 30s
+--debounce <duration>         默认 300ms
+```
+
 ### `scan`
 
-执行一次扫描，然后退出。
+向后端服务请求一次扫描，然后退出。服务未运行时失败，不 fallback。
 
 默认行为：
 
@@ -59,21 +76,7 @@ skillscope doctor
 
 ### `watch`
 
-常驻进程，接近实时监控 Codex session 目录。
-
-启动流程：
-
-1. 先执行一次 `scan`，补齐进程启动前已经存在的内容。
-2. 使用文件监听监控 `~/.codex/sessions`。
-3. 新文件创建、文件增长、文件重命名时触发增量解析。
-4. 定期做一次轻量全量扫描（不重置游标），弥补文件监听丢事件。
-
-推荐参数：
-
-```text
---poll-interval <duration>   默认 30s，用于兜底 rescan
---debounce <duration>        默认 300ms，合并密集文件事件
-```
+兼容命令。watch 生命周期由 `skillscope daemon` 管理；直接运行 `skillscope watch` 会提示启动 daemon。
 
 ### `stats`
 
@@ -165,13 +168,15 @@ serde       数据结构序列化
 serde_json  JSONL 解析
 rusqlite    SQLite
 notify      文件监听
+axum        本地 HTTP 服务
+tokio       后端服务 runtime
 walkdir     文件发现
 thiserror   错误类型
 chrono      时间解析和格式化
 shlex       shell token 化
 ```
 
-先不引入 async runtime。`scan` 和 `watch` 都可以用同步代码实现，减少复杂度。后续如果要接 HTTP API 或后台服务，再评估 `tokio`。
+后端服务使用 tokio/axum。扫描、解析、SQLite 访问仍然是同步 core，由服务端 handler / watcher 调用；CLI 不直接执行 core。
 
 ## SQLite schema
 
@@ -270,10 +275,10 @@ CREATE INDEX idx_skill_invocations_source_file ON skill_invocations(source_file)
 事件 `id` 使用稳定去重 key，例如：
 
 ```text
-codex:<source_file>:<source_offset>:<trigger_source>:<skill_path>
+<runtime>:<source_file>:<source_offset>:<trigger_source>:<skill_path_or_name>[:<tool_call_id>]
 ```
 
-`source_offset` 比行号更适合去重，因为 JSONL 追加文件中 byte offset 稳定。
+`source_offset` 比行号更适合去重，因为 JSONL 追加文件中 byte offset 稳定。最后的 `tool_call_id` 只在事件有对应工具调用 id 时出现，用来区分同一 JSONL 行内多个同名 tool use。
 
 ## 解析流程
 

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SkillInvocation {
     pub id: String,
     pub runtime: String,
@@ -80,10 +80,14 @@ impl SkillInvocation {
         confidence: f64,
     ) -> Self {
         let skill_key = skill_path.clone().unwrap_or_else(|| skill_name.clone());
+        let tool_key = tool_call_id
+            .as_ref()
+            .map(|value| format!(":{value}"))
+            .unwrap_or_default();
         let source_file_string = source_file.to_string_lossy().into_owned();
         Self {
             id: format!(
-                "{runtime}:{source_file_string}:{source_offset}:{trigger_source}:{skill_key}"
+                "{runtime}:{source_file_string}:{source_offset}:{trigger_source}:{skill_key}{tool_key}"
             ),
             runtime: runtime.to_string(),
             source: source.to_string(),

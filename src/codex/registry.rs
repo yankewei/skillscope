@@ -23,6 +23,9 @@ pub struct SkillInfo {
 pub struct SkillRegistry {
     skills: Vec<SkillInfo>,
     by_skill_path: HashMap<String, usize>,
+    by_claude_user_command: HashMap<String, usize>,
+    by_claude_plugin_command: HashMap<String, usize>,
+    diagnostics: Vec<String>,
 }
 
 impl SkillRegistry {
@@ -40,17 +43,12 @@ impl SkillRegistry {
     }
 
     pub fn match_claude_slash_command(&self, command: &str) -> Option<&SkillInfo> {
-        if let Some((plugin_name, skill_name)) = command.split_once(':') {
-            self.skills.iter().find(|skill| {
-                skill.scope == "claude_plugin"
-                    && skill.plugin_name.as_deref() == Some(plugin_name)
-                    && skill.name == skill_name
-            })
-        } else {
-            self.skills.iter().find(|skill| {
-                matches!(skill.scope.as_str(), "agent" | "claude_user") && skill.name == command
-            })
-        }
+        command
+            .contains(':')
+            .then(|| self.by_claude_plugin_command.get(command))
+            .flatten()
+            .or_else(|| self.by_claude_user_command.get(command))
+            .and_then(|index| self.skills.get(*index))
     }
 
     #[cfg(test)]
@@ -68,6 +66,10 @@ impl SkillRegistry {
 
     pub fn is_empty(&self) -> bool {
         self.skills.is_empty()
+    }
+
+    pub fn diagnostics(&self) -> &[String] {
+        &self.diagnostics
     }
 
     pub fn match_skill_file(&self, path: &Path) -> Option<&SkillInfo> {
@@ -121,6 +123,7 @@ impl SkillRegistry {
         if !root.exists() {
             return Ok(());
         }
+        let mut plugin_names: HashMap<String, Option<String>> = HashMap::new();
         for entry in WalkDir::new(root).follow_links(false) {
             let entry = entry?;
             if !entry.file_type().is_file() || entry.file_name() != "SKILL.md" {
@@ -130,9 +133,23 @@ impl SkillRegistry {
                 continue;
             }
             let plugin_id = plugin_id_from_cache_path(root, entry.path());
-            let plugin_name = plugin_id
-                .as_ref()
-                .and_then(|id| plugin_name_for_id(root, id));
+            let plugin_name = if scope == "claude_plugin" {
+                plugin_id.as_ref().and_then(|id| {
+                    if !plugin_names.contains_key(id) {
+                        let name = match plugin_name_for_id(root, id) {
+                            Ok(name) => Some(name),
+                            Err(diagnostic) => {
+                                self.diagnostics.push(diagnostic);
+                                None
+                            }
+                        };
+                        plugin_names.insert(id.clone(), name);
+                    }
+                    plugin_names.get(id).cloned().flatten()
+                })
+            } else {
+                None
+            };
             let skill_path = normalize_for_compare(entry.path());
             let Some(skill_dir) = skill_path.parent().map(Path::to_path_buf) else {
                 continue;
@@ -161,7 +178,23 @@ impl SkillRegistry {
         if self.by_skill_path.contains_key(&key) {
             return;
         }
-        self.by_skill_path.insert(key, self.skills.len());
+        let index = self.skills.len();
+        self.by_skill_path.insert(key, index);
+        match skill.scope.as_str() {
+            "agent" | "claude_user" => {
+                self.by_claude_user_command
+                    .entry(skill.name.clone())
+                    .or_insert(index);
+            }
+            "claude_plugin" => {
+                if let Some(plugin_name) = &skill.plugin_name {
+                    self.by_claude_plugin_command
+                        .entry(format!("{plugin_name}:{}", skill.name))
+                        .or_insert(index);
+                }
+            }
+            _ => {}
+        }
         self.skills.push(skill);
     }
 }
@@ -208,15 +241,94 @@ fn plugin_id_from_cache_path(root: &Path, skill_path: &Path) -> Option<String> {
     }
 }
 
-fn plugin_name_for_id(root: &Path, plugin_id: &str) -> Option<String> {
+fn plugin_name_for_id(root: &Path, plugin_id: &str) -> std::result::Result<String, String> {
     let manifest = root
         .join(plugin_id)
         .join(".claude-plugin")
         .join("plugin.json");
-    let text = fs::read_to_string(&manifest).ok()?;
-    let value: Value = serde_json::from_str(&text).ok()?;
+    let text = fs::read_to_string(&manifest)
+        .map_err(|err| format!("could not read {}: {err}", manifest.display()))?;
+    let value: Value = serde_json::from_str(&text)
+        .map_err(|err| format!("could not parse {}: {err}", manifest.display()))?;
     value
         .get("name")
         .and_then(Value::as_str)
         .map(ToString::to_string)
+        .ok_or_else(|| format!("missing string name in {}", manifest.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use std::fs;
+
+    fn skill(name: &str, scope: &str) -> SkillInfo {
+        SkillInfo {
+            name: name.to_string(),
+            skill_path: PathBuf::from(format!("/tmp/skills/{name}/SKILL.md")),
+            skill_dir: PathBuf::from(format!("/tmp/skills/{name}")),
+            scripts_dir: PathBuf::from(format!("/tmp/skills/{name}/scripts")),
+            scope: scope.to_string(),
+            plugin_id: None,
+            plugin_name: None,
+        }
+    }
+
+    fn plugin_skill(plugin_name: &str, name: &str) -> SkillInfo {
+        SkillInfo {
+            name: name.to_string(),
+            skill_path: PathBuf::from(format!("/tmp/plugins/{plugin_name}/skills/{name}/SKILL.md")),
+            skill_dir: PathBuf::from(format!("/tmp/plugins/{plugin_name}/skills/{name}")),
+            scripts_dir: PathBuf::from(format!("/tmp/plugins/{plugin_name}/skills/{name}/scripts")),
+            scope: "claude_plugin".to_string(),
+            plugin_id: Some(plugin_name.to_string()),
+            plugin_name: Some(plugin_name.to_string()),
+        }
+    }
+
+    #[test]
+    fn claude_slash_command_falls_back_to_user_skill_with_colon_name() {
+        let registry = SkillRegistry::from_skills(vec![skill("foo:bar", "agent")]);
+
+        let matched = registry.match_claude_slash_command("foo:bar").unwrap();
+
+        assert_eq!(matched.name, "foo:bar");
+        assert_eq!(matched.scope, "agent");
+    }
+
+    #[test]
+    fn claude_slash_command_prefers_plugin_match_when_present() {
+        let registry =
+            SkillRegistry::from_skills(vec![skill("foo:bar", "agent"), plugin_skill("foo", "bar")]);
+
+        let matched = registry.match_claude_slash_command("foo:bar").unwrap();
+
+        assert_eq!(matched.name, "bar");
+        assert_eq!(matched.scope, "claude_plugin");
+    }
+
+    #[test]
+    fn claude_plugin_manifest_errors_are_reported_as_diagnostics() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let skill_dir = root.join(".claude/plugins/cache/acme/bad/1.0/skills/review");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "---\nname: review\n---\n").unwrap();
+        let config = Config {
+            codex_home: root.join(".codex"),
+            claude_home: root.join(".claude"),
+            agents_home: root.join(".agents"),
+            db_path: root.join("skillscope.sqlite"),
+        };
+
+        let registry = SkillRegistry::scan(&config).unwrap();
+
+        assert_eq!(registry.len(), 1);
+        assert!(registry.match_claude_slash_command("bad:review").is_none());
+        assert!(registry
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.contains("could not read")));
+    }
 }

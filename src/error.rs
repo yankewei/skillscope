@@ -21,4 +21,10 @@ pub enum SkillScopeError {
 
     #[error("invalid path: {0}")]
     InvalidPath(String),
+
+    #[error("service unavailable: {0}")]
+    ServiceUnavailable(String),
+
+    #[error("service error: {0}")]
+    Service(String),
 }

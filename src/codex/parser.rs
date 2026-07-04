@@ -2,6 +2,7 @@ use crate::codex::command_detection::detect_implicit_skills;
 use crate::codex::registry::{SkillInfo, SkillRegistry};
 use crate::events::{SessionState, SkillInvocation};
 use crate::paths::resolve_command_path;
+use crate::tags::extract_tag;
 use chrono::Utc;
 use serde_json::Value;
 use std::path::Path;
@@ -241,15 +242,6 @@ fn skill_blocks(text: &str) -> Vec<&str> {
         remainder = &after_start[end + "</skill>".len()..];
     }
     blocks
-}
-
-fn extract_tag(text: &str, tag: &str) -> Option<String> {
-    let open = format!("<{tag}>");
-    let close = format!("</{tag}>");
-    let start = text.find(&open)? + open.len();
-    let rest = &text[start..];
-    let end = rest.find(&close)?;
-    Some(rest[..end].trim().to_string())
 }
 
 fn command_from_arguments(payload: &Value) -> Option<String> {

@@ -1,5 +1,6 @@
 use crate::codex::registry::{SkillInfo, SkillRegistry};
 use crate::events::SkillInvocation;
+use crate::tags::extract_tag;
 use chrono::Utc;
 use serde_json::Value;
 use std::path::Path;
@@ -98,12 +99,9 @@ fn parse_explicit_slash_command(
     session_id: Option<String>,
     timestamp: String,
 ) -> Vec<SkillInvocation> {
-    let Some(content) = message.get("content").and_then(Value::as_str) else {
-        return Vec::new();
-    };
-    let Some(command_name) = extract_tag(content, "command-name")
-        .or_else(|| extract_tag(content, "command-message"))
-        .map(|command| command.trim_start_matches('/').to_string())
+    let Some(command_name) = command_texts(message)
+        .into_iter()
+        .find_map(extract_command_name)
     else {
         return Vec::new();
     };
@@ -150,13 +148,31 @@ fn event_for_slash_skill(
     )
 }
 
-fn extract_tag(text: &str, tag: &str) -> Option<String> {
-    let open = format!("<{tag}>");
-    let close = format!("</{tag}>");
-    let start = text.find(&open)? + open.len();
-    let rest = &text[start..];
-    let end = rest.find(&close)?;
-    Some(rest[..end].trim().to_string())
+fn command_texts(message: &Value) -> Vec<&str> {
+    match message.get("content") {
+        Some(Value::String(text)) => vec![text.as_str()],
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter(|item| item.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|item| item.get("text").and_then(Value::as_str))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn extract_command_name(text: &str) -> Option<String> {
+    extract_tag(text, "command-name")
+        .and_then(normalize_command_name)
+        .or_else(|| extract_tag(text, "command-message").and_then(normalize_command_name))
+}
+
+fn normalize_command_name(command: String) -> Option<String> {
+    let command = command.trim().trim_start_matches('/').trim().to_string();
+    if command.is_empty() {
+        None
+    } else {
+        Some(command)
+    }
 }
 
 #[cfg(test)]
@@ -270,5 +286,44 @@ mod tests {
         let events = parse_line(line, Path::new("/tmp/claude.jsonl"), 0, 1, &registry).unwrap();
 
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn parses_slash_command_from_text_content_array() {
+        let registry = SkillRegistry::from_skills(vec![user_skill("handoff", "agent")]);
+        let line = r#"{"type":"user","timestamp":"2026-07-03T05:27:38.130Z","sessionId":"session_1","message":{"role":"user","content":[{"type":"text","text":"<command-name>/handoff</command-name>\n<command-message>handoff</command-message>"}]}}"#;
+        let events = parse_line(line, Path::new("/tmp/claude.jsonl"), 0, 1, &registry).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].skill_name, "handoff");
+    }
+
+    #[test]
+    fn ignores_command_tags_echoed_in_tool_result_arrays() {
+        let registry = SkillRegistry::from_skills(vec![user_skill("handoff", "agent")]);
+        let line = r#"{"type":"user","timestamp":"2026-07-03T05:27:38.130Z","sessionId":"session_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool_1","content":"<command-name>/handoff</command-name>\n<command-message>handoff</command-message>"}]}}"#;
+        let events = parse_line(line, Path::new("/tmp/claude.jsonl"), 0, 1, &registry).unwrap();
+
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn empty_command_name_falls_back_to_command_message() {
+        let registry = SkillRegistry::from_skills(vec![user_skill("handoff", "agent")]);
+        let line = r#"{"type":"user","timestamp":"2026-07-03T05:27:38.130Z","sessionId":"session_1","message":{"role":"user","content":"<command-name></command-name>\n<command-message>handoff</command-message>"}}"#;
+        let events = parse_line(line, Path::new("/tmp/claude.jsonl"), 0, 1, &registry).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].skill_name, "handoff");
+    }
+
+    #[test]
+    fn same_line_skill_tool_uses_have_distinct_ids() {
+        let registry = SkillRegistry::from_skills(vec![]);
+        let line = r#"{"type":"assistant","timestamp":"2026-07-02T00:00:00Z","sessionId":"session_1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Skill","input":{"skill":"think"}},{"type":"tool_use","id":"toolu_2","name":"Skill","input":{"skill":"think"}}]}}"#;
+        let events = parse_line(line, Path::new("/tmp/claude.jsonl"), 42, 1, &registry).unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_ne!(events[0].id, events[1].id);
     }
 }
