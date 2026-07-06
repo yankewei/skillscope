@@ -19,7 +19,7 @@ pub struct DoctorReport {
     pub claude_projects_dir_exists: bool,
     pub claude_project_files: usize,
     pub parsed_files: u64,
-    pub codex_skills_found: usize,
+    pub skills_found: usize,
     pub registry_diagnostics: Vec<String>,
     pub latest_parse_error: Option<String>,
 }
@@ -40,7 +40,7 @@ pub fn report(db: &Database, config: &Config) -> Result<DoctorReport> {
         claude_projects_dir_exists: config.claude_projects_dir().exists(),
         claude_project_files: claude_project_files.len(),
         parsed_files: db.parsed_file_count()?,
-        codex_skills_found: registry.len(),
+        skills_found: registry.len(),
         registry_diagnostics: registry.diagnostics().to_vec(),
         latest_parse_error: db.latest_parse_error()?,
     })
@@ -75,7 +75,7 @@ pub fn print_report(report: DoctorReport, json: bool) -> Result<()> {
     );
     println!("claude_project_files: {}", report.claude_project_files);
     println!("parsed_files: {}", report.parsed_files);
-    println!("codex_skills_found: {}", report.codex_skills_found);
+    println!("skills_found: {}", report.skills_found);
     for diagnostic in report.registry_diagnostics {
         println!("registry_diagnostic: {diagnostic}");
     }

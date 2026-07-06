@@ -17,7 +17,8 @@ pub struct ScanResult {
     pub events: Vec<SkillInvocation>,
 }
 
-pub fn scan_all(db: &mut Database, config: &Config, rescan: bool) -> Result<ScanResult> {
+#[cfg(test)]
+fn scan_all(db: &mut Database, config: &Config, rescan: bool) -> Result<ScanResult> {
     let registry = SkillRegistry::scan(config)?;
     scan_all_with_registry(db, config, &registry, rescan)
 }

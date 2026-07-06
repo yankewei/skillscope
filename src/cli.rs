@@ -3,6 +3,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
+pub const DEFAULT_SERVICE_URL: &str = "http://127.0.0.1:3766";
+pub const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:3766";
+
 #[derive(Clone, Debug, Parser)]
 #[command(name = "skillscope")]
 #[command(about = "Local Skill invocation analytics for agent session logs")]
@@ -19,7 +22,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub db: Option<PathBuf>,
 
-    #[arg(long, global = true, default_value = "http://127.0.0.1:3766")]
+    #[arg(long, global = true, default_value = DEFAULT_SERVICE_URL)]
     pub service_url: String,
 
     #[command(subcommand)]
@@ -36,7 +39,7 @@ pub enum Command {
 
 #[derive(Clone, Debug, Args)]
 pub struct DaemonArgs {
-    #[arg(long, default_value = "127.0.0.1:3766")]
+    #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
     pub addr: SocketAddr,
 
     #[arg(long, value_parser = parse_duration, default_value = "30s")]

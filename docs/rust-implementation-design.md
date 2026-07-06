@@ -57,6 +57,8 @@ skillscope doctor
 --debounce <duration>         默认 300ms
 ```
 
+当 daemon 管理命令传入非默认 `--addr` 且 `--service-url` 保持默认值时，CLI 会从 `--addr` 推导本地服务 URL；显式传入 `--service-url` 时以显式值为准。
+
 ### `scan`
 
 向后端服务请求一次扫描，然后退出。服务未运行时失败，不 fallback。
@@ -97,6 +99,7 @@ skillscope stats --json
 - Claude Code 调用数
 - 显式调用数
 - 隐式调用数
+- Claude Code `Skill` tool use 调用数
 - 首次出现时间
 - 最近出现时间
 

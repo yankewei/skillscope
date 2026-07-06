@@ -8,7 +8,8 @@ use crate::jsonl_cursor;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-pub fn scan_all(db: &mut Database, config: &Config, rescan: bool) -> Result<ScanResult> {
+#[cfg(test)]
+fn scan_all(db: &mut Database, config: &Config, rescan: bool) -> Result<ScanResult> {
     let registry = SkillRegistry::scan(config)?;
     scan_all_with_registry(db, config, &registry, rescan)
 }

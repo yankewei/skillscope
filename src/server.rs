@@ -1,6 +1,7 @@
 use crate::api::{DoctorResponse, ErrorResponse, ScanRequest, ScanResponse};
 use crate::claude;
 use crate::codex;
+use crate::codex::registry::SkillRegistry;
 use crate::config::Config;
 use crate::db::Database;
 use crate::error::Result;
@@ -129,8 +130,11 @@ async fn scan(
         )
     })?;
     run_with_db(state, move |db, config| {
-        let mut result = codex::scan::scan_all(db, config, request.rescan)?;
-        let claude_result = claude::scan::scan_all(db, config, request.rescan)?;
+        let registry = SkillRegistry::scan(config)?;
+        let mut result =
+            codex::scan::scan_all_with_registry(db, config, &registry, request.rescan)?;
+        let claude_result =
+            claude::scan::scan_all_with_registry(db, config, &registry, request.rescan)?;
         result.files_scanned += claude_result.files_scanned;
         result.events_inserted += claude_result.events_inserted;
         result.errors += claude_result.errors;
@@ -298,8 +302,10 @@ mod tests {
     async fn service_client_scans_and_reads_stats_over_real_http() {
         let (_tmp, state) = test_state();
         let sessions_dir = state.config.codex_home.join("sessions");
+        let claude_project_dir = state.config.claude_home.join("projects/project-one");
         let skill_dir = state.config.agents_home.join("skills/diagnose");
         std::fs::create_dir_all(&sessions_dir).unwrap();
+        std::fs::create_dir_all(&claude_project_dir).unwrap();
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "---\nname: diagnose\n---\n").unwrap();
         let skill_path = skill_dir.join("SKILL.md");
@@ -311,20 +317,28 @@ mod tests {
             ) + "\n",
         )
         .unwrap();
+        std::fs::write(
+            claude_project_dir.join("session.jsonl"),
+            r#"{"type":"assistant","timestamp":"2026-07-02T00:00:01Z","sessionId":"session_1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Skill","input":{"skill":"diagnose","args":"do not persist me"}}]}}"#.to_string()
+                + "\n",
+        )
+        .unwrap();
         let (base_url, server) = spawn_test_server(state).await;
 
         tokio::task::spawn_blocking(move || {
             let client = ServiceClient::new(base_url);
             client.health().unwrap();
             let scan = client.scan(&ScanRequest { rescan: false }).unwrap();
-            assert_eq!(scan.events_inserted, 1);
+            assert_eq!(scan.events_inserted, 2);
 
             let stats = client.skill_stats(None).unwrap();
             assert_eq!(stats.len(), 1);
             assert_eq!(stats[0].skill_name, "diagnose");
-            assert_eq!(stats[0].total, 1);
+            assert_eq!(stats[0].total, 2);
             assert_eq!(stats[0].codex, 1);
-            assert_eq!(stats[0].claude_code, 0);
+            assert_eq!(stats[0].claude_code, 1);
+            assert_eq!(stats[0].explicit, 1);
+            assert_eq!(stats[0].skill, 1);
         })
         .await
         .unwrap();

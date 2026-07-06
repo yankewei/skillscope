@@ -15,7 +15,9 @@ mod tags;
 mod watch;
 
 use crate::api::ScanRequest;
-use crate::cli::{Cli, Command, DaemonArgs, DaemonCommand};
+use crate::cli::{
+    Cli, Command, DaemonArgs, DaemonCommand, DEFAULT_DAEMON_ADDR, DEFAULT_SERVICE_URL,
+};
 use crate::client::ServiceClient;
 use crate::config::Config;
 use crate::error::{Result, SkillScopeError};
@@ -81,6 +83,7 @@ fn run() -> Result<()> {
 }
 
 fn run_daemon_command(cli: &Cli, config: Config, args: DaemonArgs) -> Result<()> {
+    let service_url = effective_service_url(cli, &args);
     match daemon_command(&args) {
         DaemonCommand::Run => {
             let runtime = tokio::runtime::Runtime::new()?;
@@ -91,14 +94,14 @@ fn run_daemon_command(cli: &Cli, config: Config, args: DaemonArgs) -> Result<()>
                 args.debounce,
             ))?;
         }
-        DaemonCommand::Start => start_daemon(cli, &config, &args)?,
+        DaemonCommand::Start => start_daemon(cli, &config, &args, &service_url)?,
         DaemonCommand::Status => {
-            let client = ServiceClient::new(cli.service_url.clone());
+            let client = ServiceClient::new(service_url.clone());
             client.health()?;
-            println!("skillscope daemon is running at {}", cli.service_url);
+            println!("skillscope daemon is running at {service_url}");
         }
         DaemonCommand::Stop => {
-            let client = ServiceClient::new(cli.service_url.clone());
+            let client = ServiceClient::new(service_url);
             client.shutdown()?;
             println!("skillscope daemon is stopping");
         }
@@ -110,13 +113,25 @@ fn daemon_command(args: &DaemonArgs) -> DaemonCommand {
     args.command.clone().unwrap_or(DaemonCommand::Start)
 }
 
-fn start_daemon(cli: &Cli, config: &Config, args: &DaemonArgs) -> Result<()> {
-    let client = ServiceClient::new(cli.service_url.clone());
+fn effective_service_url(cli: &Cli, args: &DaemonArgs) -> String {
+    let default_addr = default_daemon_addr();
+    if cli.service_url == DEFAULT_SERVICE_URL && args.addr != default_addr {
+        format!("http://{}", args.addr)
+    } else {
+        cli.service_url.clone()
+    }
+}
+
+fn default_daemon_addr() -> std::net::SocketAddr {
+    DEFAULT_DAEMON_ADDR
+        .parse()
+        .expect("default daemon address is valid")
+}
+
+fn start_daemon(cli: &Cli, config: &Config, args: &DaemonArgs, service_url: &str) -> Result<()> {
+    let client = ServiceClient::new(service_url.to_string());
     if client.health().is_ok() {
-        println!(
-            "skillscope daemon is already running at {}",
-            cli.service_url
-        );
+        println!("skillscope daemon is already running at {}", service_url);
         return Ok(());
     }
 
@@ -144,7 +159,7 @@ fn start_daemon(cli: &Cli, config: &Config, args: &DaemonArgs) -> Result<()> {
     wait_for_daemon(&client, Duration::from_secs(5))?;
     println!(
         "skillscope daemon started at {} (log: {})",
-        cli.service_url,
+        service_url,
         log_path.display()
     );
     Ok(())
@@ -220,26 +235,52 @@ fn format_duration(duration: Duration) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn bare_daemon_defaults_to_background_start() {
-        let args = DaemonArgs {
-            addr: "127.0.0.1:3766".parse().unwrap(),
+    fn daemon_args(addr: &str, command: Option<DaemonCommand>) -> DaemonArgs {
+        DaemonArgs {
+            addr: addr.parse().unwrap(),
             poll_interval: Duration::from_secs(30),
             debounce: Duration::from_millis(300),
-            command: None,
-        };
+            command,
+        }
+    }
+
+    fn cli_with_service_url(service_url: &str, args: DaemonArgs) -> Cli {
+        Cli {
+            codex_home: None,
+            claude_home: None,
+            agents_home: None,
+            db: None,
+            service_url: service_url.to_string(),
+            command: Command::Daemon(args),
+        }
+    }
+
+    #[test]
+    fn bare_daemon_defaults_to_background_start() {
+        let args = daemon_args(DEFAULT_DAEMON_ADDR, None);
 
         assert!(matches!(daemon_command(&args), DaemonCommand::Start));
     }
 
     #[test]
+    fn daemon_addr_sets_effective_service_url_when_default_url_is_used() {
+        let args = daemon_args("127.0.0.1:4000", Some(DaemonCommand::Status));
+        let cli = cli_with_service_url(DEFAULT_SERVICE_URL, args.clone());
+
+        assert_eq!(effective_service_url(&cli, &args), "http://127.0.0.1:4000");
+    }
+
+    #[test]
+    fn explicit_service_url_is_preserved_for_daemon_commands() {
+        let args = daemon_args("127.0.0.1:4000", Some(DaemonCommand::Status));
+        let cli = cli_with_service_url("http://127.0.0.1:5000", args.clone());
+
+        assert_eq!(effective_service_url(&cli, &args), "http://127.0.0.1:5000");
+    }
+
+    #[test]
     fn start_spawns_foreground_run_subcommand() {
-        let args = DaemonArgs {
-            addr: "127.0.0.1:3766".parse().unwrap(),
-            poll_interval: Duration::from_secs(30),
-            debounce: Duration::from_millis(300),
-            command: Some(DaemonCommand::Start),
-        };
+        let args = daemon_args(DEFAULT_DAEMON_ADDR, Some(DaemonCommand::Start));
         let mut command = ProcessCommand::new("skillscope");
 
         add_daemon_run_args(&mut command, &args);
@@ -253,7 +294,7 @@ mod tests {
             vec![
                 "daemon",
                 "--addr",
-                "127.0.0.1:3766",
+                DEFAULT_DAEMON_ADDR,
                 "--poll-interval",
                 "30s",
                 "--debounce",
