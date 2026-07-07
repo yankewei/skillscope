@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SkillScope Dashboard</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #f8f7f2;
+        --surface: #fffefa;
+        --surface-strong: #f0eee6;
+        --ink: #171916;
+        --muted: #686c64;
+        --faint: #8d9288;
+        --rule: #d9d5c8;
+        --rule-strong: #bdb8aa;
+        --codex: #416f8f;
+        --claude: #a6784e;
+        --explicit: #2f93a3;
+        --implicit: #ba7944;
+        --skill-tool: #7d9637;
+        --danger: #ad4739;
+        --shadow: 0 20px 60px rgba(43, 39, 30, 0.1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-width: 1040px;
+        background:
+          linear-gradient(rgba(23, 25, 22, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(23, 25, 22, 0.018) 1px, transparent 1px),
+          var(--paper);
+        background-size:
+          28px 28px,
+          28px 28px,
+          auto;
+        color: var(--ink);
+        font-family:
+          ui-sans-serif,
+          "Avenir Next",
+          "Segoe UI",
+          sans-serif;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .shell {
+        width: min(1320px, calc(100vw - 56px));
+        margin: 0 auto;
+        padding: 30px 0 28px;
+      }
+
+      .topline {
+        display: grid;
+        grid-template-columns: minmax(260px, 1fr) auto;
+        align-items: start;
+        gap: 24px;
+        padding: 18px 0 20px;
+        border-bottom: 1px solid var(--ink);
+      }
+
+      .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 16px;
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-family:
+          "DIN Condensed",
+          "Arial Narrow",
+          ui-sans-serif,
+          sans-serif;
+        font-size: 46px;
+        line-height: 0.88;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .brand p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-height: 32px;
+        padding: 0 10px;
+        border: 1px solid var(--rule-strong);
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+
+      .status::before {
+        width: 7px;
+        height: 7px;
+        content: "";
+        border-radius: 50%;
+        background: var(--skill-tool);
+        box-shadow: 0 0 0 3px rgba(125, 150, 55, 0.15);
+      }
+
+      .status.is-error::before {
+        background: var(--danger);
+        box-shadow: 0 0 0 3px rgba(173, 71, 57, 0.15);
+      }
+
+      .segments {
+        display: inline-grid;
+        grid-template-columns: repeat(3, 44px);
+        border: 1px solid var(--rule-strong);
+        background: var(--surface);
+      }
+
+      .segments button {
+        height: 32px;
+        border: 0;
+        border-right: 1px solid var(--rule);
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+
+      .segments button:last-child {
+        border-right: 0;
+      }
+
+      .segments button[aria-pressed="true"] {
+        background: var(--ink);
+        color: var(--surface);
+      }
+
+      .scan {
+        height: 34px;
+        padding: 0 16px;
+        border: 1px solid var(--ink);
+        border-radius: 0;
+        background: var(--ink);
+        color: var(--surface);
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .scan:disabled {
+        cursor: wait;
+        opacity: 0.62;
+      }
+
+      .readouts {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1.15fr;
+        border-right: 1px solid var(--rule);
+        border-bottom: 1px solid var(--rule);
+        border-left: 1px solid var(--rule);
+        background: rgba(255, 254, 250, 0.72);
+      }
+
+      .readout {
+        min-height: 118px;
+        padding: 20px 22px;
+        border-right: 1px solid var(--rule);
+      }
+
+      .readout:last-child {
+        border-right: 0;
+      }
+
+      .label {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .value {
+        margin-top: 12px;
+        font-family:
+          "SF Mono",
+          "IBM Plex Mono",
+          ui-monospace,
+          monospace;
+        font-size: 40px;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .top-skill {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 330px;
+        gap: 18px;
+        margin-top: 20px;
+      }
+
+      .panel {
+        border: 1px solid var(--rule);
+        background: rgba(255, 254, 250, 0.82);
+        box-shadow: var(--shadow);
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 14px;
+        min-height: 56px;
+        padding: 17px 18px 13px;
+        border-bottom: 1px solid var(--rule);
+      }
+
+      .panel-title {
+        margin: 0;
+        font-size: 15px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .panel-note {
+        color: var(--muted);
+        font-family:
+          "SF Mono",
+          ui-monospace,
+          monospace;
+        font-size: 11px;
+      }
+
+      .table-tools {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .search {
+        width: 230px;
+        height: 32px;
+        border: 1px solid var(--rule-strong);
+        border-radius: 0;
+        background: rgba(255, 254, 250, 0.9);
+        color: var(--ink);
+        font: inherit;
+        font-size: 12px;
+        outline: none;
+        padding: 0 10px;
+      }
+
+      .search::placeholder {
+        color: var(--faint);
+      }
+
+      .search:focus {
+        border-color: var(--ink);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th {
+        height: 36px;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--rule);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-align: right;
+        text-transform: uppercase;
+      }
+
+      th:first-child,
+      th:nth-child(2) {
+        text-align: left;
+      }
+
+      .sort {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        font: inherit;
+        font-size: inherit;
+        font-weight: inherit;
+        letter-spacing: inherit;
+        padding: 0;
+        text-align: inherit;
+        text-transform: inherit;
+      }
+
+      .sort::after {
+        content: "";
+        display: inline-block;
+        margin-left: 5px;
+        color: var(--ink);
+      }
+
+      .sort[aria-sort="ascending"]::after {
+        content: "ASC";
+        font-size: 9px;
+      }
+
+      .sort[aria-sort="descending"]::after {
+        content: "DESC";
+        font-size: 9px;
+      }
+
+      td {
+        height: 54px;
+        padding: 0 14px;
+        border-bottom: 1px solid rgba(217, 213, 200, 0.76);
+        font-size: 13px;
+        text-align: right;
+        vertical-align: middle;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      tbody tr {
+        background: rgba(255, 254, 250, 0.45);
+      }
+
+      tbody tr:nth-child(even) {
+        background: rgba(240, 238, 230, 0.42);
+      }
+
+      tbody tr:hover {
+        background: rgba(47, 147, 163, 0.08);
+      }
+
+      .rank {
+        width: 54px;
+        color: var(--faint);
+        font-family:
+          "SF Mono",
+          ui-monospace,
+          monospace;
+        font-size: 12px;
+        text-align: left;
+      }
+
+      .skill {
+        max-width: 260px;
+        overflow: hidden;
+        color: var(--ink);
+        font-weight: 720;
+        text-align: left;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .number {
+        font-family:
+          "SF Mono",
+          ui-monospace,
+          monospace;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .mix-cell {
+        min-width: 170px;
+      }
+
+      .stack {
+        display: flex;
+        width: 100%;
+        height: 10px;
+        overflow: hidden;
+        border: 1px solid rgba(23, 25, 22, 0.14);
+        background: var(--surface-strong);
+      }
+
+      .stack span {
+        min-width: 2px;
+      }
+
+      .explicit {
+        background: var(--explicit);
+      }
+
+      .implicit {
+        background: var(--implicit);
+      }
+
+      .skill-tool {
+        background: var(--skill-tool);
+      }
+
+      .side {
+        display: grid;
+        gap: 18px;
+      }
+
+      .side-section {
+        padding: 18px;
+        border-bottom: 1px solid var(--rule);
+      }
+
+      .side-section:last-child {
+        border-bottom: 0;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin: 16px 0;
+      }
+
+      .split strong {
+        display: block;
+        font-family:
+          "SF Mono",
+          ui-monospace,
+          monospace;
+        font-size: 34px;
+        line-height: 1;
+      }
+
+      .split span {
+        display: block;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+
+      .rail {
+        display: grid;
+        grid-template-columns: 86px 1fr 44px;
+        align-items: center;
+        gap: 10px;
+        margin-top: 13px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .rail-track {
+        height: 9px;
+        border: 1px solid rgba(23, 25, 22, 0.12);
+        background: var(--surface-strong);
+      }
+
+      .rail-fill {
+        height: 100%;
+      }
+
+      .privacy {
+        margin-top: 18px;
+        padding: 13px 0 0;
+        border-top: 1px solid var(--rule);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .empty,
+      .error {
+        padding: 52px 18px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .error {
+        color: var(--danger);
+      }
+
+      .footer {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        margin-top: 16px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      @media (max-width: 1160px) {
+        body {
+          min-width: 0;
+        }
+
+        .shell {
+          width: min(100vw - 28px, 980px);
+        }
+
+        .topline,
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .controls {
+          justify-content: space-between;
+        }
+
+        .panel-head {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .table-tools {
+          width: 100%;
+        }
+
+        .search {
+          width: 100%;
+        }
+
+        .readouts {
+          grid-template-columns: 1fr;
+        }
+
+        .readout {
+          border-right: 0;
+          border-bottom: 1px solid var(--rule);
+        }
+
+        .readout:last-child {
+          border-bottom: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topline">
+        <div class="brand">
+          <h1>SkillScope</h1>
+          <p>local skill invocation analytics</p>
+        </div>
+        <div class="controls" aria-label="Dashboard controls">
+          <span class="status" id="serviceStatus">daemon live</span>
+          <div class="segments" aria-label="Time range">
+            <button type="button" data-range="all" aria-pressed="true">All</button>
+            <button type="button" data-range="7d" aria-pressed="false">7d</button>
+            <button type="button" data-range="30d" aria-pressed="false">30d</button>
+          </div>
+          <button type="button" class="scan" id="scanButton">Scan now</button>
+        </div>
+      </header>
+
+      <section class="readouts" aria-label="Summary">
+        <div class="readout">
+          <div class="label">Total Invocations</div>
+          <div class="value" id="totalInvocations">--</div>
+        </div>
+        <div class="readout">
+          <div class="label">Active Skills</div>
+          <div class="value" id="activeSkills">--</div>
+        </div>
+        <div class="readout">
+          <div class="label">Top Skill</div>
+          <div class="value top-skill" id="topSkill">--</div>
+        </div>
+      </section>
+
+      <section class="layout">
+        <article class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Skill Usage</h2>
+            <div class="table-tools">
+              <input
+                class="search"
+                id="skillSearch"
+                type="search"
+                placeholder="Filter skills"
+                autocomplete="off"
+              />
+              <span class="panel-note" id="rangeNote">all time</span>
+            </div>
+          </div>
+          <div id="tableMount"></div>
+        </article>
+
+        <aside class="panel">
+          <div class="side-section">
+            <div class="panel-head" style="padding: 0; border: 0; min-height: 0">
+              <h2 class="panel-title">Runtime Split</h2>
+            </div>
+            <div class="split">
+              <div>
+                <strong id="codexPercent">--</strong>
+                <span>Codex</span>
+              </div>
+              <div>
+                <strong id="claudePercent">--</strong>
+                <span>Claude Code</span>
+              </div>
+            </div>
+            <div id="runtimeRails"></div>
+          </div>
+
+          <div class="side-section">
+            <div class="panel-head" style="padding: 0; border: 0; min-height: 0">
+              <h2 class="panel-title">Invocation Type</h2>
+            </div>
+            <div id="typeRails"></div>
+            <p class="privacy">Local metadata only. Prompts and outputs are not stored.</p>
+          </div>
+        </aside>
+      </section>
+
+      <footer class="footer">
+        <span id="refreshStatus">Waiting for data.</span>
+        <span>Powered by local JSONL + SQLite metadata.</span>
+      </footer>
+    </main>
+
+    <script>
+      const state = {
+        range: "all",
+        query: "",
+        sortKey: "total",
+        sortDirection: "desc",
+        skills: [],
+        invocationTypes: [],
+      };
+
+      const colors = {
+        codex: "var(--codex)",
+        claude: "var(--claude)",
+        explicit: "var(--explicit)",
+        implicit: "var(--implicit)",
+        skill: "var(--skill-tool)",
+      };
+
+      const formatter = new Intl.NumberFormat();
+
+      document.querySelectorAll("[data-range]").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.range = button.dataset.range;
+          document
+            .querySelectorAll("[data-range]")
+            .forEach((item) =>
+              item.setAttribute(
+                "aria-pressed",
+                String(item.dataset.range === state.range),
+              ),
+            );
+          loadDashboard();
+        });
+      });
+
+      document.getElementById("skillSearch").addEventListener("input", (event) => {
+        state.query = event.target.value.trim().toLowerCase();
+        renderTable();
+      });
+
+      document.getElementById("scanButton").addEventListener("click", async () => {
+        const button = document.getElementById("scanButton");
+        button.disabled = true;
+        button.textContent = "Scanning";
+        setRefreshStatus("Scan running...");
+        try {
+          const response = await fetch("/scan", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ rescan: false }),
+          });
+          if (!response.ok) {
+            throw new Error(await response.text());
+          }
+          const result = await response.json();
+          setRefreshStatus(
+            `Scan complete: ${result.events_inserted} new invocations across ${result.files_scanned} files.`,
+          );
+          await loadDashboard({ preserveStatus: true });
+        } catch (error) {
+          showError(error);
+        } finally {
+          button.disabled = false;
+          button.textContent = "Scan now";
+        }
+      });
+
+      function sinceForRange() {
+        if (state.range === "all") {
+          return null;
+        }
+        const days = state.range === "7d" ? 7 : 30;
+        return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+      }
+
+      function endpoint(path) {
+        const since = sinceForRange();
+        if (!since) {
+          return path;
+        }
+        const params = new URLSearchParams({ since });
+        return `${path}?${params}`;
+      }
+
+      async function getJson(path) {
+        const response = await fetch(endpoint(path));
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+        return response.json();
+      }
+
+      async function loadDashboard(options = {}) {
+        try {
+          const [skills, invocationTypes] = await Promise.all([
+            getJson("/stats/skills"),
+            getJson("/stats/invocation-types"),
+          ]);
+          state.skills = skills;
+          state.invocationTypes = invocationTypes;
+          render();
+          setServiceStatus("daemon live", false);
+          if (!options.preserveStatus) {
+            setRefreshStatus(`Updated ${new Date().toLocaleTimeString()}.`);
+          }
+        } catch (error) {
+          showError(error);
+        }
+      }
+
+      function render() {
+        const total = state.skills.reduce((sum, skill) => sum + skill.total, 0);
+        const topSkill = state.skills[0]?.skill_name ?? "none";
+
+        document.getElementById("totalInvocations").textContent =
+          formatter.format(total);
+        document.getElementById("activeSkills").textContent = formatter.format(
+          state.skills.length,
+        );
+        document.getElementById("topSkill").textContent = topSkill;
+        document.getElementById("rangeNote").textContent =
+          state.range === "all" ? "all time" : `last ${state.range}`;
+
+        renderTable();
+        renderRuntime();
+        renderInvocationTypes();
+      }
+
+      function renderTable() {
+        const mount = document.getElementById("tableMount");
+        if (state.skills.length === 0) {
+          mount.innerHTML =
+            '<div class="empty">No skill invocations yet. Run a scan to populate the ledger.</div>';
+          return;
+        }
+
+        const visibleSkills = sortedSkills();
+        if (visibleSkills.length === 0) {
+          mount.innerHTML =
+            '<div class="empty">No skills match the current filter.</div>';
+          return;
+        }
+
+        const rows = visibleSkills
+          .slice(0, 12)
+          .map((skill, index) => {
+            const mixTotal = skill.explicit + skill.implicit + skill.skill;
+            return `
+              <tr>
+                <td class="rank">${String(index + 1).padStart(2, "0")}</td>
+                <td class="skill" title="${escapeHtml(skill.skill_name)}">${escapeHtml(skill.skill_name)}</td>
+                <td class="number">${formatter.format(skill.total)}</td>
+                <td class="number">${formatter.format(skill.codex)}</td>
+                <td class="number">${formatter.format(skill.claude_code)}</td>
+                <td class="mix-cell">${stack([
+                  ["explicit", skill.explicit, mixTotal],
+                  ["implicit", skill.implicit, mixTotal],
+                  ["skill-tool", skill.skill, mixTotal],
+                ])}</td>
+                <td class="number">${formatSeen(skill.last_seen)}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        mount.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th>${sortButton("skill_name", "Skill")}</th>
+                <th>${sortButton("total", "Total")}</th>
+                <th>${sortButton("codex", "Codex")}</th>
+                <th>${sortButton("claude_code", "Claude")}</th>
+                <th>Mix</th>
+                <th>${sortButton("last_seen", "Last Seen")}</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        `;
+
+        mount.querySelectorAll("[data-sort]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const key = button.dataset.sort;
+            if (state.sortKey === key) {
+              state.sortDirection =
+                state.sortDirection === "asc" ? "desc" : "asc";
+            } else {
+              state.sortKey = key;
+              state.sortDirection = key === "skill_name" ? "asc" : "desc";
+            }
+            renderTable();
+          });
+        });
+      }
+
+      function sortedSkills() {
+        const query = state.query;
+        return state.skills
+          .filter((skill) => !query || skill.skill_name.toLowerCase().includes(query))
+          .slice()
+          .sort((left, right) => {
+            const direction = state.sortDirection === "asc" ? 1 : -1;
+            const leftValue = sortValue(left, state.sortKey);
+            const rightValue = sortValue(right, state.sortKey);
+            if (typeof leftValue === "string" || typeof rightValue === "string") {
+              return (
+                String(leftValue).localeCompare(String(rightValue), undefined, {
+                  sensitivity: "base",
+                }) * direction
+              );
+            }
+            return (leftValue - rightValue) * direction;
+          });
+      }
+
+      function sortValue(skill, key) {
+        if (key === "last_seen") {
+          return skill.last_seen ? new Date(skill.last_seen).getTime() : 0;
+        }
+        return skill[key] ?? 0;
+      }
+
+      function sortButton(key, label) {
+        const direction =
+          state.sortKey === key
+            ? state.sortDirection === "asc"
+              ? "ascending"
+              : "descending"
+            : "none";
+        return `<button type="button" class="sort" data-sort="${key}" aria-sort="${direction}">${label}</button>`;
+      }
+
+      function renderRuntime() {
+        const codex = state.skills.reduce((sum, skill) => sum + skill.codex, 0);
+        const claude = state.skills.reduce(
+          (sum, skill) => sum + skill.claude_code,
+          0,
+        );
+        const total = codex + claude;
+        const codexPct = percent(codex, total);
+        const claudePct = percent(claude, total);
+
+        document.getElementById("codexPercent").textContent = `${codexPct}%`;
+        document.getElementById("claudePercent").textContent = `${claudePct}%`;
+        document.getElementById("runtimeRails").innerHTML = [
+          rail("Codex", codexPct, colors.codex),
+          rail("Claude", claudePct, colors.claude),
+        ].join("");
+      }
+
+      function renderInvocationTypes() {
+        const totals = state.invocationTypes.reduce((acc, stat) => {
+          acc[stat.invocation_type] =
+            (acc[stat.invocation_type] ?? 0) + stat.total;
+          return acc;
+        }, {});
+        const total = Object.values(totals).reduce((sum, value) => sum + value, 0);
+        document.getElementById("typeRails").innerHTML = [
+          rail("Explicit", percent(totals.explicit ?? 0, total), colors.explicit),
+          rail("Implicit", percent(totals.implicit ?? 0, total), colors.implicit),
+          rail("Skill Tool", percent(totals.skill ?? 0, total), colors.skill),
+        ].join("");
+      }
+
+      function stack(parts) {
+        const spans = parts
+          .map(([name, value, total]) => {
+            const width = percent(value, total);
+            return `<span class="${name}" style="width: ${width}%"></span>`;
+          })
+          .join("");
+        return `<div class="stack" aria-hidden="true">${spans}</div>`;
+      }
+
+      function rail(label, value, color) {
+        return `
+          <div class="rail">
+            <span>${label}</span>
+            <div class="rail-track"><div class="rail-fill" style="width: ${value}%; background: ${color}"></div></div>
+            <span class="number">${value}%</span>
+          </div>
+        `;
+      }
+
+      function percent(value, total) {
+        if (!total) {
+          return 0;
+        }
+        return Math.round((value / total) * 100);
+      }
+
+      function formatSeen(value) {
+        if (!value) {
+          return "--";
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return value;
+        }
+        return date.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        });
+      }
+
+      function setRefreshStatus(message) {
+        document.getElementById("refreshStatus").textContent = message;
+      }
+
+      function setServiceStatus(message, isError) {
+        const status = document.getElementById("serviceStatus");
+        status.textContent = message;
+        status.classList.toggle("is-error", isError);
+      }
+
+      function showError(error) {
+        setServiceStatus("service error", true);
+        setRefreshStatus(error.message || String(error));
+        document.getElementById("tableMount").innerHTML =
+          '<div class="error">Could not load SkillScope data.</div>';
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (char) => {
+          const entities = {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          };
+          return entities[char];
+        });
+      }
+
+      loadDashboard();
+    </script>
+  </body>
+</html>

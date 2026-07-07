@@ -9,6 +9,7 @@ use crate::stats;
 use crate::watch;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
+use axum::response::Html;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -61,6 +62,8 @@ pub async fn run(
 
 fn app(state: AppState) -> Router {
     Router::new()
+        .route("/", get(dashboard))
+        .route("/dashboard", get(dashboard))
         .route("/health", get(health))
         .route("/scan", post(scan))
         .route("/stats/skills", get(skill_stats))
@@ -97,6 +100,10 @@ async fn shutdown_signal(shutdown_rx: oneshot::Receiver<()>) {
 
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "ok" }))
+}
+
+async fn dashboard() -> Html<&'static str> {
+    Html(crate::dashboard::HTML)
 }
 
 async fn shutdown(
@@ -216,6 +223,27 @@ mod tests {
                 shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
             },
         )
+    }
+
+    #[tokio::test]
+    async fn dashboard_endpoint_serves_static_ui() {
+        let (_tmp, state) = test_state();
+        let response = app(state)
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/dashboard")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_text(response).await;
+        assert!(body.contains("SkillScope"));
+        assert!(body.contains("/stats/skills"));
+        assert!(body.contains("Local metadata only. Prompts and outputs are not stored."));
     }
 
     #[tokio::test]

@@ -43,6 +43,18 @@ Start the local daemon:
 skillscope daemon start
 ```
 
+Open the local dashboard:
+
+```sh
+skillscope dashboard
+```
+
+Or open the running daemon directly:
+
+```text
+http://127.0.0.1:3766/dashboard
+```
+
 Run a scan:
 
 ```sh
@@ -78,6 +90,7 @@ skillscope daemon stop
 ### `daemon`
 
 Runs the local HTTP backend and file watcher. `skillscope daemon` defaults to `skillscope daemon start`.
+The daemon also serves the local dashboard at `/` and `/dashboard`.
 
 ```sh
 skillscope daemon start
@@ -95,6 +108,15 @@ Useful options:
 ```
 
 If you pass a non-default `--addr` to a daemon management command and leave `--service-url` at its default, SkillScope uses the matching local URL for `start`, `status`, and `stop`. Pass `--service-url` explicitly when connecting through a different local endpoint.
+
+### `dashboard`
+
+Starts the daemon if needed and opens the local dashboard in your default browser.
+
+```sh
+skillscope dashboard
+skillscope dashboard --addr 127.0.0.1:4000
+```
 
 ### `scan`
 
@@ -164,4 +186,4 @@ CI runs formatting, clippy, and tests on stable Rust.
 
 ## Current scope
 
-SkillScope is local-only. It does not currently provide a dashboard, remote sync, or cross-device aggregation.
+SkillScope is local-only. It provides a local dashboard and CLI statistics, but does not provide remote sync or cross-device aggregation.
