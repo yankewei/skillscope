@@ -32,9 +32,22 @@ pub struct Cli {
 #[derive(Clone, Debug, Subcommand)]
 pub enum Command {
     Daemon(DaemonArgs),
+    Dashboard(DashboardArgs),
     Scan(ScanArgs),
     Stats(StatsArgs),
     Doctor(DoctorArgs),
+}
+
+#[derive(Clone, Debug, Args)]
+pub struct DashboardArgs {
+    #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
+    pub addr: SocketAddr,
+
+    #[arg(long, value_parser = parse_duration, default_value = "30s")]
+    pub poll_interval: Duration,
+
+    #[arg(long, value_parser = parse_duration, default_value = "300ms")]
+    pub debounce: Duration,
 }
 
 #[derive(Clone, Debug, Args)]

@@ -4,6 +4,7 @@ mod cli;
 mod client;
 mod codex;
 mod config;
+mod dashboard;
 mod db;
 mod error;
 mod events;
@@ -16,7 +17,8 @@ mod watch;
 
 use crate::api::ScanRequest;
 use crate::cli::{
-    Cli, Command, DaemonArgs, DaemonCommand, DEFAULT_DAEMON_ADDR, DEFAULT_SERVICE_URL,
+    Cli, Command, DaemonArgs, DaemonCommand, DashboardArgs, DEFAULT_DAEMON_ADDR,
+    DEFAULT_SERVICE_URL,
 };
 use crate::client::ServiceClient;
 use crate::config::Config;
@@ -44,6 +46,9 @@ fn run() -> Result<()> {
     match command {
         Command::Daemon(args) => {
             run_daemon_command(&cli, config, args)?;
+        }
+        Command::Dashboard(args) => {
+            run_dashboard_command(&cli, config, args)?;
         }
         Command::Scan(args) => {
             let client = ServiceClient::new(service_url);
@@ -109,14 +114,42 @@ fn run_daemon_command(cli: &Cli, config: Config, args: DaemonArgs) -> Result<()>
     Ok(())
 }
 
+fn run_dashboard_command(cli: &Cli, config: Config, args: DashboardArgs) -> Result<()> {
+    let service_url = effective_service_url_for_addr(cli, args.addr);
+    let client = ServiceClient::new(service_url.clone());
+    if client.health().is_err() {
+        let daemon_args = DaemonArgs {
+            addr: args.addr,
+            poll_interval: args.poll_interval,
+            debounce: args.debounce,
+            command: Some(DaemonCommand::Start),
+        };
+        start_daemon(cli, &config, &daemon_args, &service_url)?;
+    }
+
+    let url = format!("{}/dashboard", service_url.trim_end_matches('/'));
+    match open_url(&url) {
+        Ok(()) => println!("opened SkillScope dashboard at {url}"),
+        Err(err) => {
+            eprintln!("could not open browser automatically: {err}");
+            println!("SkillScope dashboard: {url}");
+        }
+    }
+    Ok(())
+}
+
 fn daemon_command(args: &DaemonArgs) -> DaemonCommand {
     args.command.clone().unwrap_or(DaemonCommand::Start)
 }
 
 fn effective_service_url(cli: &Cli, args: &DaemonArgs) -> String {
+    effective_service_url_for_addr(cli, args.addr)
+}
+
+fn effective_service_url_for_addr(cli: &Cli, addr: std::net::SocketAddr) -> String {
     let default_addr = default_daemon_addr();
-    if cli.service_url == DEFAULT_SERVICE_URL && args.addr != default_addr {
-        format!("http://{}", args.addr)
+    if cli.service_url == DEFAULT_SERVICE_URL && addr != default_addr {
+        format!("http://{addr}")
     } else {
         cli.service_url.clone()
     }
@@ -216,6 +249,40 @@ fn wait_for_daemon(client: &ServiceClient, timeout: Duration) -> Result<()> {
     }
 }
 
+fn open_url(url: &str) -> Result<()> {
+    let status = open_url_command(url).status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(SkillScopeError::Service(format!(
+            "browser opener exited with {status}"
+        )))
+    }
+}
+
+fn open_url_command(url: &str) -> ProcessCommand {
+    #[cfg(target_os = "macos")]
+    {
+        let mut command = ProcessCommand::new("open");
+        command.arg(url);
+        command
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut command = ProcessCommand::new("cmd");
+        command.args(["/C", "start", "", url]);
+        command
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let mut command = ProcessCommand::new("xdg-open");
+        command.arg(url);
+        command
+    }
+}
+
 fn daemon_log_path(db_path: &Path) -> PathBuf {
     db_path
         .parent()
@@ -255,6 +322,17 @@ mod tests {
         }
     }
 
+    fn cli_with_dashboard_service_url(service_url: &str, args: DashboardArgs) -> Cli {
+        Cli {
+            codex_home: None,
+            claude_home: None,
+            agents_home: None,
+            db: None,
+            service_url: service_url.to_string(),
+            command: Command::Dashboard(args),
+        }
+    }
+
     #[test]
     fn bare_daemon_defaults_to_background_start() {
         let args = daemon_args(DEFAULT_DAEMON_ADDR, None);
@@ -276,6 +354,34 @@ mod tests {
         let cli = cli_with_service_url("http://127.0.0.1:5000", args.clone());
 
         assert_eq!(effective_service_url(&cli, &args), "http://127.0.0.1:5000");
+    }
+
+    #[test]
+    fn dashboard_addr_sets_effective_service_url_when_default_url_is_used() {
+        let args = DashboardArgs {
+            addr: "127.0.0.1:4000".parse().unwrap(),
+            poll_interval: Duration::from_secs(30),
+            debounce: Duration::from_millis(300),
+        };
+        let cli = cli_with_dashboard_service_url(DEFAULT_SERVICE_URL, args.clone());
+
+        assert_eq!(
+            effective_service_url_for_addr(&cli, args.addr),
+            "http://127.0.0.1:4000"
+        );
+    }
+
+    #[test]
+    fn dashboard_opener_targets_platform_browser_command() {
+        let command = open_url_command("http://127.0.0.1:3766/dashboard");
+        let program = command.get_program().to_string_lossy();
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(program, "open");
+        #[cfg(target_os = "windows")]
+        assert_eq!(program, "cmd");
+        #[cfg(all(unix, not(target_os = "macos")))]
+        assert_eq!(program, "xdg-open");
     }
 
     #[test]
